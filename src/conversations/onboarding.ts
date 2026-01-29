@@ -556,61 +556,20 @@ export async function onboardingConversation(
       break;
     }
 
-    // Validate goal with LLM using streaming reasoning display
-    const chatId = ctx.chat?.id;
-    if (!chatId) {
-      await ctx.reply("Ошибка: не удалось определить чат.");
-      return;
-    }
+    // Validate goal with LLM
+    await ctx.reply("🤖 Проверяю реалистичность цели...");
 
-    // Generate unique draft ID for sendMessageDraft
-    const draftId = Date.now();
-
-    // Throttle for Telegram API limits
-    let lastDraftUpdate = 0;
-    const THROTTLE_MS = 500;
-
-    // Initial message
-    await ctx.api.sendMessageDraft(chatId, draftId, "🤔 Анализирую вашу цель...").catch(() => {
-      // Fallback if sendMessageDraft not supported (e.g., Threaded Mode not enabled)
-    });
-
-    const validation = await conversation.external(async () => {
-      return llmService.validateGoalStreaming(
-        {
-          track,
-          currentWeight,
-          currentWaist,
-          height,
-          targetWeight,
-          targetWaist,
-          durationMonths: challenge.durationMonths,
-        },
-        {
-          onReasoningChunk: async (reasoning) => {
-            const now = Date.now();
-            if (now - lastDraftUpdate > THROTTLE_MS) {
-              lastDraftUpdate = now;
-              // Show last 800 characters of reasoning to stay within limits
-              const displayText =
-                reasoning.length > 800
-                  ? `...${reasoning.slice(-800)}`
-                  : reasoning;
-              await ctx.api
-                .sendMessageDraft(
-                  chatId,
-                  draftId,
-                  `💭 *Анализирую...*\n\n_${displayText}_`,
-                  { parse_mode: "Markdown" }
-                )
-                .catch(() => {
-                  // Ignore errors (throttling, unsupported)
-                });
-            }
-          },
-        }
-      );
-    });
+    const validation = await conversation.external(() =>
+      llmService.validateGoal({
+        track,
+        currentWeight,
+        currentWaist,
+        height,
+        targetWeight,
+        targetWaist,
+        durationMonths: challenge.durationMonths,
+      })
+    );
 
     // Create goal record
     await conversation.external(() =>
@@ -632,17 +591,11 @@ export async function onboardingConversation(
           ? "⚠️"
           : "💡";
 
-    // Build final message with reasoning summary
-    let finalMessage = "";
-    if (validation.reasoning) {
-      // Show first 400 characters of reasoning as summary
-      const shortReasoning = validation.reasoning.slice(0, 400);
-      finalMessage += `💭 *Рассуждения AI:*\n_${shortReasoning}${validation.reasoning.length > 400 ? "..." : ""}_\n\n`;
-    }
-    finalMessage += `${validationEmoji} *Оценка цели:* ${validation.feedback}\n\n`;
-    finalMessage += `Цель сохранена. Продолжаем настройку.`;
-
-    await ctx.reply(finalMessage, { parse_mode: "Markdown" });
+    await ctx.reply(
+      `${validationEmoji} *Оценка цели:* ${validation.feedback}\n\n` +
+        `Цель сохранена. Продолжаем настройку.`,
+      { parse_mode: "Markdown" }
+    );
   }
 
   // === Check if commitments already exist ===
