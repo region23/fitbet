@@ -423,17 +423,6 @@ export async function onboardingConversation(
       durationMonths: challenge.durationMonths,
     });
 
-    // Start LLM recommendation fetch in background
-    const llmRecommendationPromise = llmService.getGoalRecommendation({
-      track,
-      currentWeight,
-      currentWaist,
-      height,
-      durationMonths: challenge.durationMonths,
-      recommendedWeight: recommendedGoals.targetWeight,
-      recommendedWaist: recommendedGoals.targetWaist,
-    });
-
     // === STEP 9: Target weight ===
     const weightKeyboard = new InlineKeyboard().text(
       `✨ Использовать ${recommendedGoals.targetWeight} кг`,
@@ -451,21 +440,6 @@ export async function onboardingConversation(
         parse_mode: "Markdown",
       }
     );
-
-    // Try to get LLM advice (non-blocking)
-    const showLlmAdvice = async () => {
-      try {
-        const llmAdvice = await llmRecommendationPromise;
-        if (llmAdvice?.weightAdvice) {
-          await ctx.reply(`💡 *Совет:* ${llmAdvice.weightAdvice}`, {
-            parse_mode: "Markdown",
-          });
-        }
-      } catch {
-        // Silently ignore
-      }
-    };
-    showLlmAdvice();
 
     while (true) {
       const targetCtx = await conversation.wait();

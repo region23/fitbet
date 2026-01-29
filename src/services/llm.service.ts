@@ -25,7 +25,7 @@ export interface GoalValidationParams {
 
 export const llmService = {
   /**
-   * Validate goal using moonshotai/kimi-k2.5 model
+   * Validate goal using google/gemini-3-flash-preview model
    */
   async validateGoal(params: GoalValidationParams): Promise<GoalValidationResult> {
     // If no API key configured, return a default validation
@@ -50,7 +50,7 @@ export const llmService = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "moonshotai/kimi-k2.5",
+          model: "google/gemini-3-flash-preview",
           messages: [{ role: "user", content: prompt }],
           max_tokens: 3000,
           temperature: 0.3,
@@ -107,7 +107,7 @@ export const llmService = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "moonshotai/kimi-k2.5",
+          model: "google/gemini-3-flash-preview",
           messages: [{ role: "user", content: prompt }],
           max_tokens: 2000,
           temperature: 0.5,
