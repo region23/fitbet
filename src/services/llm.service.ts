@@ -1,5 +1,6 @@
 import { config } from "../config";
 import type { Track } from "../db/schema";
+import { photoService } from "./photo.service";
 
 export interface GoalValidationResult {
   isRealistic: boolean;
@@ -21,6 +22,62 @@ export interface GoalValidationParams {
   targetWeight: number;
   targetWaist: number;
   durationMonths: number;
+}
+
+export interface CheckinRecommendationResult {
+  progressAssessment: string;
+  bodyCompositionNotes: string;
+  nutritionAdvice: string;
+  trainingAdvice: string;
+  motivationalMessage: string;
+  warningFlags: string[];
+  tokensUsed?: number;
+  processingTimeMs: number;
+}
+
+export interface CheckinRecommendationParams {
+  // Participant context
+  track: Track;
+  height: number;
+  targetWeight: number;
+  targetWaist: number;
+  durationMonths: number;
+
+  // Baseline (start)
+  startWeight: number;
+  startWaist: number;
+  startPhotoPaths: {
+    front: string;
+    left: string;
+    right: string;
+    back: string;
+  } | null; // null for first checkin
+
+  // Current checkin
+  currentWeight: number;
+  currentWaist: number;
+  currentPhotoPaths: {
+    front: string;
+    left: string;
+    right: string;
+    back: string;
+  };
+
+  // History
+  checkinNumber: number;
+  totalCheckins: number;
+  previousCheckins: Array<{
+    number: number;
+    weight: number;
+    waist: number;
+    date: Date;
+  }>;
+
+  // Discipline
+  completedCheckins: number;
+
+  // Commitments
+  commitments: string[];
 }
 
 export const llmService = {
@@ -129,6 +186,76 @@ export const llmService = {
       return null;
     }
   },
+
+  /**
+   * Get checkin recommendations with vision analysis
+   */
+  async getCheckinRecommendations(
+    params: CheckinRecommendationParams
+  ): Promise<CheckinRecommendationResult> {
+    if (!config.openRouterApiKey) {
+      throw new Error("OpenRouter API key not configured");
+    }
+
+    const startTime = Date.now();
+
+    // Load current photos as base64
+    const currentPhotos = await photoService.loadPhotosAsBase64(params.currentPhotoPaths);
+
+    // Load start photos if this is not the first checkin
+    let startPhotos: { front: string; left: string; right: string; back: string } | null = null;
+    if (params.startPhotoPaths) {
+      startPhotos = await photoService.loadPhotosAsBase64(params.startPhotoPaths);
+    }
+
+    // Build multimodal prompt
+    const { textPrompt, visionContent } = buildCheckinPrompt(params, currentPhotos, startPhotos);
+
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.openRouterApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: textPrompt }, ...visionContent],
+            },
+          ],
+          max_tokens: 4000,
+          temperature: 0.7,
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("LLM API error:", response.status, errorText);
+        throw new Error(`LLM API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      const tokensUsed = data.usage?.total_tokens;
+
+      console.log("LLM checkin recommendation response:", content);
+
+      const processingTimeMs = Date.now() - startTime;
+
+      return {
+        ...parseCheckinResponse(content),
+        tokensUsed,
+        processingTimeMs,
+      };
+    } catch (error) {
+      console.error("LLM checkin recommendation error:", error);
+      throw error;
+    }
+  },
 };
 
 function buildRecommendationPrompt(params: {
@@ -221,5 +348,120 @@ function parseValidationResponse(content: string): GoalValidationResult {
     isRealistic: result === "realistic",
     result,
     feedback,
+  };
+}
+
+function buildCheckinPrompt(
+  params: CheckinRecommendationParams,
+  currentPhotos: { front: string; left: string; right: string; back: string },
+  startPhotos: { front: string; left: string; right: string; back: string } | null
+) {
+  const trackDescription = params.track === "cut" ? "похудение (Cut)" : "набор массы (Bulk)";
+
+  // Calculate changes
+  const weightChange = params.currentWeight - params.startWeight;
+  const waistChange = params.currentWaist - params.startWaist;
+
+  // Calculate BMI and WHtR
+  const currentBMI = params.currentWeight / Math.pow(params.height / 100, 2);
+  const currentWHtR = params.currentWaist / params.height;
+
+  // Build history section
+  let historySection = "";
+  if (params.previousCheckins.length > 0) {
+    historySection = "\n\nИСТОРИЯ ПРОШЛЫХ ЧЕК-ИНОВ:\n";
+    params.previousCheckins.forEach((checkin) => {
+      historySection += `- Чек-ин #${checkin.number}: ${checkin.weight} кг / ${checkin.waist} см\n`;
+    });
+  }
+
+  // Build commitments section
+  let commitmentsSection = "";
+  if (params.commitments.length > 0) {
+    commitmentsSection = `\n\nОБЯЗАТЕЛЬСТВА УЧАСТНИКА:\n${params.commitments.map((c) => `- ${c}`).join("\n")}`;
+  }
+
+  const textPrompt = `Ты опытный фитнес-тренер и нутрициолог. Проанализируй прогресс участника на основе метрик и фотографий.
+
+КОНТЕКСТ УЧАСТНИКА:
+- Трек: ${trackDescription}
+- Рост: ${params.height} см
+- Длительность челленджа: ${params.durationMonths} месяцев
+- Текущий чек-ин: #${params.checkinNumber} из ${params.totalCheckins}
+- Дисциплина: ${params.completedCheckins}/${params.totalCheckins} чек-инов
+
+ЦЕЛЕВЫЕ ПОКАЗАТЕЛИ:
+- Целевой вес: ${params.targetWeight} кг
+- Целевая талия: ${params.targetWaist} см
+
+СТАРТОВЫЕ ПОКАЗАТЕЛИ:
+- Вес: ${params.startWeight} кг
+- Талия: ${params.startWaist} см
+
+ТЕКУЩИЕ ПОКАЗАТЕЛИ:
+- Вес: ${params.currentWeight} кг (${weightChange > 0 ? "+" : ""}${weightChange.toFixed(1)} кг от старта)
+- Талия: ${params.currentWaist} см (${waistChange > 0 ? "+" : ""}${waistChange.toFixed(1)} см от старта)
+- BMI: ${currentBMI.toFixed(1)}
+- WHtR: ${currentWHtR.toFixed(2)}${historySection}${commitmentsSection}
+
+ФОТОГРАФИИ:
+Ниже представлены текущие фотографии участника (анфас, профиль слева, профиль справа, со спины).${startPhotos ? " После текущих фото идут стартовые фото для сравнения." : ""}
+
+ОТВЕТЬ СТРОГО В ФОРМАТЕ:
+ПРОГРЕСС: [оценка динамики за период, 2-3 предложения]
+ВИЗУАЛЬНЫЕ_ИЗМЕНЕНИЯ: [видимые изменения в композиции тела, 2-3 предложения]
+ПИТАНИЕ: [конкретные рекомендации по питанию, 2-3 предложения]
+ТРЕНИРОВКИ: [рекомендации по тренировкам, 2-3 предложения]
+МОТИВАЦИЯ: [мотивирующее сообщение, 1-2 предложения]
+ПРЕДУПРЕЖДЕНИЯ: [тревожные признаки через запятую, или "нет"]`;
+
+  // Build vision content array
+  const visionContent = [
+    photoService.createVisionPayload(currentPhotos.front, "Текущее фото: анфас"),
+    photoService.createVisionPayload(currentPhotos.left, "Текущее фото: профиль слева"),
+    photoService.createVisionPayload(currentPhotos.right, "Текущее фото: профиль справа"),
+    photoService.createVisionPayload(currentPhotos.back, "Текущее фото: со спины"),
+  ];
+
+  // Add start photos if available (for comparison)
+  if (startPhotos) {
+    visionContent.push(
+      photoService.createVisionPayload(startPhotos.front, "Стартовое фото: анфас"),
+      photoService.createVisionPayload(startPhotos.left, "Стартовое фото: профиль слева"),
+      photoService.createVisionPayload(startPhotos.right, "Стартовое фото: профиль справа"),
+      photoService.createVisionPayload(startPhotos.back, "Стартовое фото: со спины")
+    );
+  }
+
+  return { textPrompt, visionContent };
+}
+
+function parseCheckinResponse(content: string): Omit<
+  CheckinRecommendationResult,
+  "tokensUsed" | "processingTimeMs"
+> {
+  const progressMatch = content.match(/ПРОГРЕСС:\s*(.+?)(?=ВИЗУАЛЬНЫЕ_ИЗМЕНЕНИЯ:|$)/is);
+  const bodyMatch = content.match(/ВИЗУАЛЬНЫЕ_ИЗМЕНЕНИЯ:\s*(.+?)(?=ПИТАНИЕ:|$)/is);
+  const nutritionMatch = content.match(/ПИТАНИЕ:\s*(.+?)(?=ТРЕНИРОВКИ:|$)/is);
+  const trainingMatch = content.match(/ТРЕНИРОВКИ:\s*(.+?)(?=МОТИВАЦИЯ:|$)/is);
+  const motivationMatch = content.match(/МОТИВАЦИЯ:\s*(.+?)(?=ПРЕДУПРЕЖДЕНИЯ:|$)/is);
+  const warningsMatch = content.match(/ПРЕДУПРЕЖДЕНИЯ:\s*(.+)/is);
+
+  const warningsText = warningsMatch?.[1]?.trim() || "нет";
+  const warningFlags =
+    warningsText.toLowerCase() === "нет"
+      ? []
+      : warningsText
+          .split(",")
+          .map((w) => w.trim())
+          .filter((w) => w.length > 0);
+
+  return {
+    progressAssessment: progressMatch?.[1]?.trim() || "Продолжайте работать над целями",
+    bodyCompositionNotes: bodyMatch?.[1]?.trim() || "Видны положительные изменения",
+    nutritionAdvice: nutritionMatch?.[1]?.trim() || "Следите за балансом питания",
+    trainingAdvice: trainingMatch?.[1]?.trim() || "Продолжайте регулярные тренировки",
+    motivationalMessage: motivationMatch?.[1]?.trim() || "Отличная работа! 💪",
+    warningFlags,
   };
 }

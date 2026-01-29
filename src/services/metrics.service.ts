@@ -50,9 +50,15 @@ export const metricsService = {
       const weeklyLoss = (currentWeight - targetWeight) / (durationMonths * 4);
       weightReason = `здоровый BMI ~22 для роста ${height} см, потеря ~${weeklyLoss.toFixed(1)} кг/неделю`;
 
-      // Waist: minimum of (current - 5cm) or ideal
-      targetWaist = Math.min(currentWaist - 5, idealWaist);
-      waistReason = `оптимальное соотношение талия/рост 0.45`;
+      // Waist: 1.5 cm/month reduction (middle of 1-2 cm/month safe range)
+      const waistReductionPerMonth = 1.5;
+      const targetWaistReduction = waistReductionPerMonth * durationMonths;
+      targetWaist = Math.round(
+        Math.max(currentWaist - targetWaistReduction, idealWaist)
+      );
+
+      const monthlyWaistLoss = (currentWaist - targetWaist) / durationMonths;
+      waistReason = `оптимальное соотношение талия/рост 0.45, потеря ~${monthlyWaistLoss.toFixed(1)} см/месяц`;
     } else {
       // For Bulk: target is ideal + 5-10%
       targetWeight = Math.round(idealWeight * 1.07);
@@ -67,9 +73,15 @@ export const metricsService = {
       const weeklyGain = (targetWeight - currentWeight) / (durationMonths * 4);
       weightReason = `набор мышечной массы ~${weeklyGain.toFixed(2)} кг/неделю`;
 
-      // Waist: may stay same or increase slightly (muscle)
-      targetWaist = Math.round(currentWaist + 2);
-      waistReason = `небольшое увеличение за счёт мышц кора`;
+      // Waist: 0.3 cm/month gain (muscle gain in core)
+      const waistGainPerMonth = 0.3;
+      const targetWaistGain = waistGainPerMonth * durationMonths;
+      targetWaist = Math.round(
+        Math.min(currentWaist + targetWaistGain, currentWaist + 5)
+      );
+
+      const monthlyWaistGain = (targetWaist - currentWaist) / durationMonths;
+      waistReason = `небольшое увеличение за счёт мышц кора ~${monthlyWaistGain.toFixed(1)} см/месяц`;
     }
 
     return {

@@ -4,6 +4,11 @@ import {
   participantService,
   challengeService,
   checkinService,
+  goalService,
+  commitmentService,
+  llmService,
+  photoService,
+  checkinRecommendationService,
 } from "../services";
 
 type CheckinConversation = Conversation<BotContext>;
@@ -212,7 +217,7 @@ export async function checkinConversation(
   await ctx.reply("✅ Все фото получены");
 
   // Save check-in
-  await conversation.external(() =>
+  const checkin = await conversation.external(() =>
     checkinService.createCheckin({
       participantId: participant.id,
       windowId,
@@ -241,6 +246,7 @@ export async function checkinConversation(
   const waistChangeStr =
     waistChange > 0 ? `+${waistChange.toFixed(1)}` : waistChange.toFixed(1);
 
+  // Send basic confirmation
   await ctx.reply(
     `🎉 *Чек-ин #${window.windowNumber} принят!*\n\n` +
       `*Текущие показатели:*\n` +
@@ -250,6 +256,134 @@ export async function checkinConversation(
       `Продолжайте в том же духе! 💪`,
     { parse_mode: "Markdown" }
   );
+
+  // Generate LLM recommendations with photos
+  try {
+    await ctx.reply("🤖 Анализирую ваш прогресс...");
+
+    // Get participant's goal
+    const goal = await conversation.external(() =>
+      goalService.findByParticipantId(participant.id)
+    );
+
+    // Get commitments
+    const commitments = await conversation.external(() =>
+      commitmentService.getParticipantCommitments(participant.id)
+    );
+
+    // Get previous checkins for history
+    const allCheckins = await conversation.external(() =>
+      checkinService.getCheckinsByParticipant(participant.id)
+    );
+
+    const previousCheckins = allCheckins
+      .filter((c) => c.id !== checkin.id)
+      .map((c, idx) => ({
+        number: idx + 1,
+        weight: c.weight,
+        waist: c.waist,
+        date: c.submittedAt,
+      }));
+
+    // Download and save current photos locally
+    const currentPhotoPaths = await conversation.external(() =>
+      photoService.downloadAndSavePhotos(
+        ctx.api,
+        {
+          front: photoFrontId,
+          left: photoLeftId,
+          right: photoRightId,
+          back: photoBackId,
+        },
+        participant.id,
+        window.windowNumber
+      )
+    );
+
+    // Determine if we have start photos
+    let startPhotoPaths = null;
+    if (window.windowNumber > 1 && participant.startPhotoFrontId) {
+      // Load from local storage (already saved during onboarding)
+      startPhotoPaths = {
+        front: `data/photos/${participant.id}/start/front.jpg`,
+        left: `data/photos/${participant.id}/start/left.jpg`,
+        right: `data/photos/${participant.id}/start/right.jpg`,
+        back: `data/photos/${participant.id}/start/back.jpg`,
+      };
+    }
+
+    if (
+      !goal ||
+      !participant.track ||
+      !participant.height ||
+      !goal.targetWeight ||
+      !goal.targetWaist
+    ) {
+      // No goal set or missing required fields, skip recommendations
+      await ctx.reply("Продолжайте в том же духе! 💪");
+    } else {
+      // Call LLM service
+      const recommendation = await conversation.external(() =>
+        llmService.getCheckinRecommendations({
+          track: participant.track!,
+          height: participant.height!,
+          targetWeight: goal.targetWeight!,
+          targetWaist: goal.targetWaist!,
+          durationMonths: challenge.durationMonths,
+          startWeight,
+          startWaist,
+          startPhotoPaths,
+          currentWeight: weight,
+          currentWaist: waist,
+          currentPhotoPaths,
+          checkinNumber: window.windowNumber,
+          totalCheckins: participant.totalCheckins + 1,
+          previousCheckins,
+          completedCheckins: participant.completedCheckins + 1,
+          commitments: commitments.map((c) => c.name),
+        })
+      );
+
+      // Save to database
+      await conversation.external(() =>
+        checkinRecommendationService.create({
+          checkinId: checkin.id,
+          participantId: participant.id,
+          progressAssessment: recommendation.progressAssessment,
+          bodyCompositionNotes: recommendation.bodyCompositionNotes,
+          nutritionAdvice: recommendation.nutritionAdvice,
+          trainingAdvice: recommendation.trainingAdvice,
+          motivationalMessage: recommendation.motivationalMessage,
+          warningFlags: JSON.stringify(recommendation.warningFlags),
+          llmModel: "google/gemini-3-flash-preview",
+          tokensUsed: recommendation.tokensUsed,
+          processingTimeMs: recommendation.processingTimeMs,
+        })
+      );
+
+      // Format and send recommendations
+      let message = `📊 *Анализ прогресса*\n${recommendation.progressAssessment}\n\n`;
+      message += `👁️ *Визуальные изменения*\n${recommendation.bodyCompositionNotes}\n\n`;
+      message += `🍎 *Питание*\n${recommendation.nutritionAdvice}\n\n`;
+      message += `💪 *Тренировки*\n${recommendation.trainingAdvice}\n\n`;
+
+      if (recommendation.warningFlags.length > 0) {
+        message += `⚠️ *Важно*\n`;
+        recommendation.warningFlags.forEach((warning) => {
+          message += `• ${warning}\n`;
+        });
+        message += `\n`;
+      }
+
+      message += `✨ ${recommendation.motivationalMessage}`;
+
+      await ctx.reply(message, { parse_mode: "Markdown" });
+    }
+  } catch (error) {
+    console.error("Error generating checkin recommendations:", error);
+    // Graceful fallback - don't break the checkin flow
+    await ctx.reply("Продолжайте в том же духе! 💪");
+  }
 
   // Clear session
   ctx.session.checkin = undefined;

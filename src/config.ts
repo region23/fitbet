@@ -1,3 +1,5 @@
+import path from "node:path";
+
 function getEnvOrThrow(key: string): string {
   const value = process.env[key];
   if (!value) {
@@ -16,6 +18,9 @@ export const config = {
   openRouterApiKey: getEnvOrDefault("OPENROUTER_API_KEY", ""),
   sentryDsn: getEnvOrDefault("SENTRY_DSN", ""),
   nodeEnv: getEnvOrDefault("NODE_ENV", "development"),
+
+  // Storage paths
+  photosDirectory: path.join(process.cwd(), "data/photos"),
 
   // Check-in settings
   checkinWindowHours: 48,

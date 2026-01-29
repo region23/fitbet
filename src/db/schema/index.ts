@@ -3,6 +3,7 @@ export * from "./participants";
 export * from "./goals";
 export * from "./checkin-windows";
 export * from "./checkins";
+export * from "./checkin-recommendations";
 export * from "./commitments";
 export * from "./payments";
 export * from "./bankholder-elections";

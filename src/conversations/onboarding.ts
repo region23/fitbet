@@ -8,6 +8,7 @@ import {
   paymentService,
   llmService,
   metricsService,
+  photoService,
 } from "../services";
 import { InlineKeyboard } from "grammy";
 import type { Track, Participant } from "../db/schema";
@@ -397,6 +398,26 @@ export async function onboardingConversation(
         startPhotoBackId: photoBackId,
       })
     );
+
+    // Also save photos locally for future LLM analysis
+    try {
+      await conversation.external(() =>
+        photoService.downloadAndSavePhotos(
+          ctx.api,
+          {
+            front: photoFrontId,
+            left: photoLeftId,
+            right: photoRightId,
+            back: photoBackId,
+          },
+          participant.id,
+          "start"
+        )
+      );
+    } catch (error) {
+      console.error("Error saving start photos locally:", error);
+      // Don't break onboarding flow if local save fails
+    }
   }
 
   // === Check if goal already exists ===
@@ -404,8 +425,8 @@ export async function onboardingConversation(
     goalService.findByParticipantId(participant.id)
   );
 
-  let targetWeight: number;
-  let targetWaist: number;
+  let targetWeight = 0;
+  let targetWaist = 0;
 
   if (existingGoal && !shouldRestart) {
     targetWeight = existingGoal.targetWeight!;
@@ -414,162 +435,248 @@ export async function onboardingConversation(
       `✅ Цель уже установлена: ${targetWeight} кг / ${targetWaist} см`
     );
   } else {
-    // Calculate recommended goals
-    const recommendedGoals = metricsService.calculateRecommendedGoals({
-      track,
-      currentWeight,
-      currentWaist,
-      height,
-      durationMonths: challenge.durationMonths,
-    });
+    // Goal setting with revision loop
+    let goalAccepted = false;
+    let savedGoalId: number | null = null;
+    let revisionAttempts = 0;
+    const MAX_REVISIONS = 3;
 
-    // === STEP 9: Target weight ===
-    const weightKeyboard = new InlineKeyboard().text(
-      `✨ Использовать ${recommendedGoals.targetWeight} кг`,
-      `use_weight_${recommendedGoals.targetWeight}`
-    );
-
-    await ctx.reply(
-      `🎯 *Целевой вес*\n\n` +
-        `Сейчас: ${currentWeight} кг\n` +
-        `📊 Рекомендуемый: *${recommendedGoals.targetWeight} кг*\n` +
-        `   _(${recommendedGoals.weightReason})_\n\n` +
-        `Введите желаемый вес или нажмите кнопку:`,
-      {
-        reply_markup: weightKeyboard,
-        parse_mode: "Markdown",
-      }
-    );
-
-    while (true) {
-      const targetCtx = await conversation.wait();
-
-      if (targetCtx.callbackQuery?.data?.startsWith("use_weight_")) {
-        targetWeight = parseFloat(targetCtx.callbackQuery.data.replace("use_weight_", ""));
-        await targetCtx.answerCallbackQuery();
-        await targetCtx.editMessageText(`✅ Целевой вес: ${targetWeight} кг`);
-        break;
-      }
-
-      const text = targetCtx.message?.text;
-
-      if (!text) {
-        await ctx.reply("Пожалуйста, введите число или нажмите кнопку.");
-        continue;
-      }
-
-      const parsed = parseFloat(text.replace(",", "."));
-      if (isNaN(parsed) || parsed < 30 || parsed > 300) {
-        await ctx.reply("Введите корректный вес (30-300 кг).");
-        continue;
-      }
-
-      if (track === "cut" && parsed >= currentWeight) {
-        await ctx.reply("Для Cut целевой вес должен быть меньше текущего.");
-        continue;
-      }
-
-      if (track === "bulk" && parsed <= currentWeight) {
-        await ctx.reply("Для Bulk целевой вес должен быть больше текущего.");
-        continue;
-      }
-
-      targetWeight = parsed;
-      await ctx.reply(`✅ Целевой вес: ${targetWeight} кг`);
-      break;
-    }
-
-    // === STEP 10: Target waist ===
-    const waistKeyboard = new InlineKeyboard().text(
-      `✨ Использовать ${recommendedGoals.targetWaist} см`,
-      `use_waist_${recommendedGoals.targetWaist}`
-    );
-
-    await ctx.reply(
-      `🎯 *Целевой обхват талии*\n\n` +
-        `Сейчас: ${currentWaist} см\n` +
-        `📊 Рекомендуемый: *${recommendedGoals.targetWaist} см*\n` +
-        `   _(${recommendedGoals.waistReason})_\n\n` +
-        `Введите желаемый обхват или нажмите кнопку:`,
-      {
-        reply_markup: waistKeyboard,
-        parse_mode: "Markdown",
-      }
-    );
-
-    while (true) {
-      const targetCtx = await conversation.wait();
-
-      if (targetCtx.callbackQuery?.data?.startsWith("use_waist_")) {
-        targetWaist = parseFloat(targetCtx.callbackQuery.data.replace("use_waist_", ""));
-        await targetCtx.answerCallbackQuery();
-        await targetCtx.editMessageText(`✅ Целевой обхват талии: ${targetWaist} см`);
-        break;
-      }
-
-      const text = targetCtx.message?.text;
-
-      if (!text) {
-        await ctx.reply("Пожалуйста, введите число или нажмите кнопку.");
-        continue;
-      }
-
-      const parsed = parseFloat(text.replace(",", "."));
-      if (isNaN(parsed) || parsed < 40 || parsed > 200) {
-        await ctx.reply("Введите корректный обхват (40-200 см).");
-        continue;
-      }
-
-      if (track === "cut" && parsed >= currentWaist) {
-        await ctx.reply("Для Cut целевой обхват должен быть меньше текущего.");
-        continue;
-      }
-
-      targetWaist = parsed;
-      await ctx.reply(`✅ Целевой обхват талии: ${targetWaist} см`);
-      break;
-    }
-
-    // Validate goal with LLM
-    await ctx.reply("🤖 Проверяю реалистичность цели...");
-
-    const validation = await conversation.external(() =>
-      llmService.validateGoal({
+    while (!goalAccepted) {
+      // Calculate recommended goals
+      const recommendedGoals = metricsService.calculateRecommendedGoals({
         track,
         currentWeight,
         currentWaist,
         height,
-        targetWeight,
-        targetWaist,
         durationMonths: challenge.durationMonths,
-      })
-    );
+      });
 
-    // Create goal record
-    await conversation.external(() =>
-      goalService.create({
-        participantId: participant.id,
-        targetWeight,
-        targetWaist,
-        isValidated: true,
-        validationResult: validation.result,
-        validationFeedback: validation.feedback,
-        validatedAt: new Date(),
-      })
-    );
+      // === STEP 9: Target weight ===
+      const weightKeyboard = new InlineKeyboard().text(
+        `✨ Использовать ${recommendedGoals.targetWeight} кг`,
+        `use_weight_${recommendedGoals.targetWeight}`
+      );
 
-    const validationEmoji =
-      validation.result === "realistic"
-        ? "✅"
-        : validation.result === "too_aggressive"
-          ? "⚠️"
-          : "💡";
+      await ctx.reply(
+        `🎯 *Целевой вес*\n\n` +
+          `Сейчас: ${currentWeight} кг\n` +
+          `📊 Рекомендуемый: *${recommendedGoals.targetWeight} кг*\n` +
+          `   _(${recommendedGoals.weightReason})_\n\n` +
+          `Введите желаемый вес или нажмите кнопку:`,
+        {
+          reply_markup: weightKeyboard,
+          parse_mode: "Markdown",
+        }
+      );
 
-    await ctx.reply(
-      `${validationEmoji} *Оценка цели:* ${validation.feedback}\n\n` +
-        `Цель сохранена. Продолжаем настройку.`,
-      { parse_mode: "Markdown" }
-    );
+      while (true) {
+        const targetCtx = await conversation.wait();
+
+        if (targetCtx.callbackQuery?.data?.startsWith("use_weight_")) {
+          targetWeight = parseFloat(targetCtx.callbackQuery.data.replace("use_weight_", ""));
+          await targetCtx.answerCallbackQuery();
+          await targetCtx.editMessageText(`✅ Целевой вес: ${targetWeight} кг`);
+          break;
+        }
+
+        const text = targetCtx.message?.text;
+
+        if (!text) {
+          await ctx.reply("Пожалуйста, введите число или нажмите кнопку.");
+          continue;
+        }
+
+        const parsed = parseFloat(text.replace(",", "."));
+        if (isNaN(parsed) || parsed < 30 || parsed > 300) {
+          await ctx.reply("Введите корректный вес (30-300 кг).");
+          continue;
+        }
+
+        if (track === "cut" && parsed >= currentWeight) {
+          await ctx.reply("Для Cut целевой вес должен быть меньше текущего.");
+          continue;
+        }
+
+        if (track === "bulk" && parsed <= currentWeight) {
+          await ctx.reply("Для Bulk целевой вес должен быть больше текущего.");
+          continue;
+        }
+
+        targetWeight = parsed;
+        await ctx.reply(`✅ Целевой вес: ${targetWeight} кг`);
+        break;
+      }
+
+      // === STEP 10: Target waist ===
+      const waistKeyboard = new InlineKeyboard().text(
+        `✨ Использовать ${recommendedGoals.targetWaist} см`,
+        `use_waist_${recommendedGoals.targetWaist}`
+      );
+
+      await ctx.reply(
+        `🎯 *Целевой обхват талии*\n\n` +
+          `Сейчас: ${currentWaist} см\n` +
+          `📊 Рекомендуемый: *${recommendedGoals.targetWaist} см*\n` +
+          `   _(${recommendedGoals.waistReason})_\n\n` +
+          `Введите желаемый обхват или нажмите кнопку:`,
+        {
+          reply_markup: waistKeyboard,
+          parse_mode: "Markdown",
+        }
+      );
+
+      while (true) {
+        const targetCtx = await conversation.wait();
+
+        if (targetCtx.callbackQuery?.data?.startsWith("use_waist_")) {
+          targetWaist = parseFloat(targetCtx.callbackQuery.data.replace("use_waist_", ""));
+          await targetCtx.answerCallbackQuery();
+          await targetCtx.editMessageText(`✅ Целевой обхват талии: ${targetWaist} см`);
+          break;
+        }
+
+        const text = targetCtx.message?.text;
+
+        if (!text) {
+          await ctx.reply("Пожалуйста, введите число или нажмите кнопку.");
+          continue;
+        }
+
+        const parsed = parseFloat(text.replace(",", "."));
+        if (isNaN(parsed) || parsed < 40 || parsed > 200) {
+          await ctx.reply("Введите корректный обхват (40-200 см).");
+          continue;
+        }
+
+        if (track === "cut" && parsed >= currentWaist) {
+          await ctx.reply("Для Cut целевой обхват должен быть меньше текущего.");
+          continue;
+        }
+
+        targetWaist = parsed;
+        await ctx.reply(`✅ Целевой обхват талии: ${targetWaist} см`);
+        break;
+      }
+
+      // === LLM Validation ===
+      await ctx.reply("🤖 Проверяю реалистичность цели...");
+
+      const validation = await conversation.external(() =>
+        llmService.validateGoal({
+          track,
+          currentWeight,
+          currentWaist,
+          height,
+          targetWeight,
+          targetWaist,
+          durationMonths: challenge.durationMonths,
+        })
+      );
+
+      // === Save or update goal ===
+      try {
+        if (savedGoalId) {
+          // Update existing goal on revision
+          await conversation.external(() =>
+            goalService.updateTargets(savedGoalId!, {
+              targetWeight,
+              targetWaist,
+            })
+          );
+          await conversation.external(() =>
+            goalService.updateValidation(savedGoalId!, {
+              isValidated: true,
+              validationResult: validation.result,
+              validationFeedback: validation.feedback,
+            })
+          );
+        } else {
+          // Create new goal
+          const newGoal = await conversation.external(() =>
+            goalService.create({
+              participantId: participant.id,
+              targetWeight,
+              targetWaist,
+              isValidated: true,
+              validationResult: validation.result,
+              validationFeedback: validation.feedback,
+              validatedAt: new Date(),
+            })
+          );
+          savedGoalId = newGoal.id;
+        }
+      } catch (error) {
+        console.error("Goal save error:", error);
+        await ctx.reply(
+          "❌ Ошибка при сохранении цели. Попробуйте снова или обратитесь к администратору."
+        );
+        continue; // Retry without counting as revision attempt
+      }
+
+      // === Determine if revision is needed ===
+      const needsReview = validation.result !== "realistic";
+
+      if (needsReview) {
+        revisionAttempts++;
+
+        // Force acceptance after MAX_REVISIONS
+        if (revisionAttempts >= MAX_REVISIONS) {
+          const emoji = validation.result === "too_aggressive" ? "⚠️" : "💡";
+          await ctx.reply(
+            `${emoji} *Оценка цели:* ${validation.feedback}\n\n` +
+            `Вы пересматривали цель ${MAX_REVISIONS} раза. Принимаю текущие параметры.\n` +
+            `Цель сохранена. Продолжаем настройку.`,
+            { parse_mode: "Markdown" }
+          );
+          goalAccepted = true;
+          break;
+        }
+
+        // Show warning with revision option
+        const validationEmoji = validation.result === "too_aggressive" ? "⚠️" : "💡";
+        const revisionKeyboard = new InlineKeyboard()
+          .text("🔄 Пересмотреть цель", `goal_revise_${participant.id}`)
+          .text("✅ Продолжить с этими параметрами", `goal_accept_${participant.id}`);
+
+        const warningText = validation.result === "too_aggressive"
+          ? "⚠️ Ваша цель может быть слишком агрессивной и привести к проблемам со здоровьем. Рекомендуем пересмотреть параметры для безопасного прогресса."
+          : "💡 Ваша цель кажется довольно скромной. Возможно, стоит поставить более амбициозную задачу для лучших результатов.";
+
+        await ctx.reply(
+          `${validationEmoji} *Оценка цели*\n\n` +
+          `${validation.feedback}\n\n` +
+          `${warningText}\n\n` +
+          `Что вы хотите сделать?`,
+          {
+            reply_markup: revisionKeyboard,
+            parse_mode: "Markdown",
+          }
+        );
+
+        // Wait for user decision
+        const decisionCtx = await conversation.waitForCallbackQuery(/^goal_(revise|accept)_\d+$/);
+        await decisionCtx.answerCallbackQuery();
+
+        if (decisionCtx.callbackQuery.data.startsWith("goal_revise_")) {
+          await decisionCtx.editMessageText("🔄 Давайте пересмотрим вашу цель...");
+          goalAccepted = false; // Continue loop
+        } else {
+          await decisionCtx.editMessageText(
+            `✅ Цель сохранена: ${targetWeight} кг / ${targetWaist} см\n\n` +
+            `Продолжаем настройку.`
+          );
+          goalAccepted = true; // Exit loop
+        }
+      } else {
+        // Realistic goal - automatic acceptance
+        await ctx.reply(
+          `✅ *Оценка цели:* ${validation.feedback}\n\n` +
+          `Цель сохранена. Продолжаем настройку.`,
+          { parse_mode: "Markdown" }
+        );
+        goalAccepted = true; // Exit loop
+      }
+    }
   }
 
   // === Check if commitments already exist ===
