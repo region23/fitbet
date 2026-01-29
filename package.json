@@ -1,0 +1,33 @@
+{
+  "name": "fitbet",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "dev:node": "npx tsx --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "start": "bun run dist/index.js",
+    "start:node": "npx tsx src/index.ts",
+    "db:generate": "drizzle-kit generate:sqlite",
+    "db:push": "drizzle-kit push:sqlite",
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@grammyjs/conversations": "^1.2.0",
+    "@grammyjs/runner": "^2.0.3",
+    "@libsql/client": "^0.4.3",
+    "@sentry/bun": "^10.38.0",
+    "cron": "^3.1.6",
+    "drizzle-orm": "^0.29.3",
+    "grammy": "^1.21.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/cron": "^2.4.0",
+    "drizzle-kit": "^0.20.14",
+    "tsx": "^4.21.0",
+    "typescript": "^5.3.3"
+  }
+}
