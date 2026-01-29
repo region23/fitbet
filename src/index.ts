@@ -11,18 +11,26 @@ if (config.sentryDsn) {
 
 import { createBot, registerCommands } from "./bot";
 import { startScheduler, stopScheduler } from "./scheduler";
+import { runMigrations } from "./db";
 import { seedCommitments } from "./db/seed";
 
 async function main() {
   console.log("Starting FitBet bot...");
   console.log(`Environment: ${config.nodeEnv}`);
 
+  // Run database migrations
+  try {
+    await runMigrations();
+  } catch (error) {
+    console.error("Error running migrations:", error);
+    process.exit(1);
+  }
+
   // Seed default data
   try {
     await seedCommitments();
   } catch (error) {
     console.error("Error seeding database:", error);
-    // Continue anyway - seed might fail if tables don't exist yet
   }
 
   // Create bot

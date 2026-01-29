@@ -43,7 +43,7 @@ export const llmService = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "moonshotai/kimi-k2-instruct",
+          model: "moonshotai/kimi-k2.5",
           messages: [{ role: "user", content: prompt }],
           max_tokens: 500,
           temperature: 0.3,
@@ -96,7 +96,7 @@ export const llmService = {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "moonshotai/kimi-k2-instruct",
+          model: "moonshotai/kimi-k2.5",
           messages: [{ role: "user", content: prompt }],
           max_tokens: 400,
           temperature: 0.5,
