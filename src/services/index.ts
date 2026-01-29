@@ -6,4 +6,9 @@ export { commitmentService } from "./commitment.service";
 export { paymentService } from "./payment.service";
 export { scoringService } from "./scoring.service";
 export { llmService } from "./llm.service";
+export type {
+  GoalValidationResult,
+  StreamingOptions,
+  GoalValidationParams,
+} from "./llm.service";
 export { metricsService } from "./metrics.service";
