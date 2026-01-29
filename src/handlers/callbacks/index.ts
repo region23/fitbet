@@ -6,6 +6,7 @@ import {
   handleBankHolderCallback,
   handleConfirmPaymentCallback,
 } from "./payment";
+import { handleVoteCallback } from "./bankholder-vote";
 import { handleCheckinCallback } from "./checkin";
 
 export function setupCallbackHandlers(bot: Bot<BotContext>) {
@@ -16,6 +17,9 @@ export function setupCallbackHandlers(bot: Bot<BotContext>) {
   bot.callbackQuery(/^paid_\d+$/, handlePaidCallback);
   bot.callbackQuery(/^bankholder_\d+_\d+$/, handleBankHolderCallback);
   bot.callbackQuery(/^confirm_\d+$/, handleConfirmPaymentCallback);
+
+  // Bank Holder voting
+  bot.callbackQuery(/^vote_\d+_\d+$/, handleVoteCallback);
 
   // Check-in
   bot.callbackQuery(/^checkin_\d+$/, handleCheckinCallback);

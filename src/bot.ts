@@ -9,6 +9,7 @@ import { loggerMiddleware, errorHandler } from "./middleware";
 import { challengeSetupConversation } from "./conversations/challenge-setup";
 import { onboardingConversation } from "./conversations/onboarding";
 import { checkinConversation } from "./conversations/checkin";
+import { bankHolderVotingConversation } from "./conversations/bankholder-voting";
 
 // Import handlers
 import { setupCommandHandlers } from "./handlers/commands";
@@ -24,6 +25,7 @@ const privateCommands = [
 // Commands for group chats
 const groupCommands = [
   { command: "create", description: "Создать новый челлендж" },
+  { command: "bankholder", description: "Запустить голосование за Bank Holder" },
   { command: "status", description: "Статус челленджа в этой группе" },
   { command: "help", description: "Справка по боту" },
 ];
@@ -74,6 +76,7 @@ export function createBot() {
   bot.use(createConversation(challengeSetupConversation));
   bot.use(createConversation(onboardingConversation));
   bot.use(createConversation(checkinConversation));
+  bot.use(createConversation(bankHolderVotingConversation));
 
   // Setup command handlers
   setupCommandHandlers(bot);

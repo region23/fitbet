@@ -5,3 +5,5 @@ export * from "./checkin-windows";
 export * from "./checkins";
 export * from "./commitments";
 export * from "./payments";
+export * from "./bankholder-elections";
+export * from "./bankholder-votes";

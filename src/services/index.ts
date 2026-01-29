@@ -8,3 +8,4 @@ export { scoringService } from "./scoring.service";
 export { llmService } from "./llm.service";
 export type { GoalValidationResult, GoalValidationParams } from "./llm.service";
 export { metricsService } from "./metrics.service";
+export { bankHolderService } from "./bankholder.service";

@@ -7,6 +7,7 @@ export const challenges = sqliteTable("challenges", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   chatId: integer("chat_id").notNull(),
   chatTitle: text("chat_title"),
+  creatorId: integer("creator_id").notNull(),
 
   // Challenge settings
   durationMonths: integer("duration_months").notNull().default(6), // 6 or 12 months

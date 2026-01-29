@@ -19,6 +19,32 @@ export async function startCommand(ctx: BotContext) {
       return;
     }
 
+    // Check if user has active participation - prevent re-onboarding
+    const { challengeService } = await import("../../services");
+    const activeParticipations = await participantService.findByUserId(userId);
+    const activeNonOnboarding = activeParticipations.find(
+      (p) =>
+        p.status !== "onboarding" &&
+        p.status !== "completed" &&
+        p.status !== "dropped" &&
+        p.status !== "disqualified"
+    );
+
+    if (activeNonOnboarding) {
+      const challenge = await challengeService.findById(activeNonOnboarding.challengeId);
+      if (challenge && (challenge.status === "active" || challenge.status === "pending_payments")) {
+        await ctx.reply(
+          `✅ *Вы уже участвуете в челлендже!*\n\n` +
+            `Чат: ${challenge.chatTitle}\n` +
+            `Статус челленджа: ${challenge.status === "active" ? "Активен" : "Ожидание оплат"}\n\n` +
+            `Изменение анкеты после начала челленджа недоступно.\n` +
+            `Используйте /status для просмотра информации.`,
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+    }
+
     // Default welcome message
     await ctx.reply(
       `👋 *Добро пожаловать в FitBet!*\n\n` +

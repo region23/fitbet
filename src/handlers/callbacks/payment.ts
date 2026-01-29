@@ -41,50 +41,74 @@ export async function handlePaidCallback(ctx: BotContext) {
 
   await ctx.answerCallbackQuery({ text: "Оплата отмечена!" });
 
-  await ctx.editMessageText(
-    `✅ *Оплата отмечена*\n\n` +
-      `Ожидайте подтверждения от Bank Holder.\n` +
-      `Мы уведомим вас, когда челлендж начнётся.`,
-    { parse_mode: "Markdown" }
-  );
-
-  // Notify the group chat
+  // Get challenge
   const challenge = await challengeService.findById(participant.challengeId);
-  if (challenge) {
-    const name = participant.firstName || participant.username || `User ${userId}`;
+  if (!challenge) {
+    await ctx.editMessageText("Ошибка: челлендж не найден.");
+    return;
+  }
 
+  const name = participant.firstName || participant.username || `User ${userId}`;
+
+  // Check if user is Bank Holder - auto-confirm
+  if (challenge.bankHolderId === userId) {
+    // Auto-confirm payment for Bank Holder
+    await paymentService.confirm(participantId, userId);
+    await participantService.updateStatus(participantId, "active");
+
+    await ctx.editMessageText(
+      `✅ *Ваша оплата подтверждена!*\n\n` +
+        `Как Bank Holder, ваша оплата подтверждается автоматически.\n` +
+        `Ожидайте подтверждения оплат от других участников.`,
+      { parse_mode: "Markdown" }
+    );
+
+    // Notify group
+    await ctx.api.sendMessage(
+      challenge.chatId,
+      `✅ ${name} (Bank Holder) оплатил ставку. Оплата подтверждена автоматически.`
+    );
+
+    // Check if all payments confirmed - activate challenge
+    const allConfirmed = await paymentService.areAllPaymentsConfirmed(challenge.id);
+    if (allConfirmed) {
+      const { checkinService } = await import("../../services");
+
+      // Activate challenge
+      const activated = await challengeService.activate(challenge.id);
+      if (!activated) return;
+
+      // Schedule check-in windows
+      await checkinService.scheduleWindowsForChallenge(
+        challenge.id,
+        activated.startedAt!,
+        activated.durationMonths
+      );
+
+      await ctx.api.sendMessage(
+        challenge.chatId,
+        `🎉 *Челлендж начался!*\n\n` +
+          `Все оплаты подтверждены. Челлендж официально стартовал!\n\n` +
+          `📅 Длительность: ${activated.durationMonths} месяцев\n` +
+          `🏁 Окончание: ${activated.endsAt?.toLocaleDateString("ru-RU")}\n\n` +
+          `Первое окно чек-ина откроется через 2 недели. Удачи! 💪`,
+        { parse_mode: "Markdown" }
+      );
+    }
+  } else {
+    // Normal flow - wait for Bank Holder confirmation
+    await ctx.editMessageText(
+      `✅ *Оплата отмечена*\n\n` +
+        `Ожидайте подтверждения от Bank Holder.\n` +
+        `Мы уведомим вас, когда челлендж начнётся.`,
+      { parse_mode: "Markdown" }
+    );
+
+    // Notify the group chat
     await ctx.api.sendMessage(
       challenge.chatId,
       `💳 ${name} отметил оплату. Ожидается подтверждение Bank Holder.`
     );
-
-    // Check if we need to select Bank Holder
-    // If this is the first payment_marked, offer to select Bank Holder
-    const allParticipants = await participantService.findByChallengeId(challenge.id);
-    const needsBankHolder = !challenge.bankHolderId;
-    const hasCompletedOnboarding = allParticipants.filter(
-      (p) => p.status !== "onboarding"
-    );
-
-    if (needsBankHolder && hasCompletedOnboarding.length >= 2) {
-      // Offer Bank Holder selection
-      const keyboard = new InlineKeyboard();
-      for (const p of hasCompletedOnboarding) {
-        const pName = p.firstName || p.username || `User ${p.userId}`;
-        keyboard.text(pName, `bankholder_${challenge.id}_${p.userId}`).row();
-      }
-
-      await ctx.api.sendMessage(
-        challenge.chatId,
-        `🏦 *Выберите Bank Holder*\n\n` +
-          `Bank Holder будет получать оплаты и подтверждать их. ` +
-          `Выберите одного из участников:`,
-        {
-          reply_markup: keyboard,
-          parse_mode: "Markdown",
-        }
-      );
-    }
   }
 }
 

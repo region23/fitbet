@@ -193,6 +193,7 @@ export async function challengeSetupConversation(
     challengeService.create({
       chatId,
       chatTitle,
+      creatorId,
       durationMonths,
       stakeAmount,
       disciplineThreshold,
