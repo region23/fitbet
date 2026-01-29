@@ -6,26 +6,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 FitBet is a Telegram-native fitness betting platform where friend groups make financial bets on fitness improvements. Users create challenges with transparent rules (weight/waist metrics + discipline tracking), bi-weekly check-ins with photos, and automated winner calculation.
 
-**Status:** Pre-MVP planning phase. Product documentation exists but no application code has been written yet.
+**Status:** MVP implementation complete. Full-featured bot with LLM-powered goal validation, multimodal check-in analysis, and automated challenge management.
 
 ## Tech Stack
 
-- **Runtime:** Bun.sh
-- **Language:** TypeScript
+- **Runtime:** Bun.sh (with Node.js fallback via tsx)
+- **Language:** TypeScript (ES2022 target, strict mode)
 - **Bot Framework:** grammY (Telegram bot framework)
   - Session Plugin for state management
   - Conversations Plugin for multi-step dialogs (uses replay engine)
-- **Database:** SQLite with Drizzle ORM
+- **Database:** SQLite with Drizzle ORM v0.29.3 (11 tables, 4 migrations)
+- **LLM Integration:** OpenRouter API
+  - Model: `google/gemini-3-flash-preview` (multimodal vision)
+  - Goal validation, recommendations, and check-in analysis
+- **Monitoring:** Sentry for error tracking
+- **Automation:** Cron scheduler (hourly jobs for check-in windows, reminders, finals)
 - **Media Storage:** Telegram file_id (native)
+- **DevOps:** Docker, GitHub Actions CI/CD
 - **Hosting:** VPS with Coolify
 
-## Expected Commands (once implemented)
+## Development Commands
 
 ```bash
 bun install          # Install dependencies
-bun run dev          # Local development
+bun run dev          # Local development with watch mode
+bun run dev:node     # Node.js fallback with tsx
 bun run build        # Bundle for production
+bun run start        # Run production build
+bun run typecheck    # TypeScript type checking
 bun test             # Run tests
+bun run db:generate  # Generate Drizzle migrations
+bun run db:push      # Push schema changes to DB
+bun run db:studio    # Open Drizzle Studio
 ```
 
 ## Architecture
@@ -36,8 +48,12 @@ bun test             # Run tests
 - **Participant** — User with role, status, track (Cut/Bulk)
 - **Goal** — Target metrics with LLM-validated realism
 - **CheckIn** — Bi-weekly submission (weight, waist, 4 photos: front, left, right, back)
-- **Commitment** — Process commitments selected by participant
+- **CheckInWindow** — 48-hour submission windows with automated scheduling
+- **CheckInRecommendation** — LLM-generated progress analysis with multimodal vision
+- **Commitment** — Process commitments selected by participant (templates + participant_commitments)
 - **Payment** — Bank Holder manual verification
+- **BankHolderElection** — Democratic voting system for Bank Holder selection
+- **BankHolderVote** — Individual votes in Bank Holder election
 - **MetricsService** — BMI/WHtR-based goal recommendations calculator
 
 ### Key Flows

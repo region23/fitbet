@@ -3,6 +3,33 @@ import path from "node:path";
 import type { Bot, Api } from "grammy";
 import { config } from "../config";
 
+/**
+ * Fetch with timeout using AbortController
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+}
+
 type PhotoAngle = "front" | "left" | "right" | "back";
 
 interface PhotoSet {
@@ -31,7 +58,7 @@ export const photoService = {
 
     // Download from Telegram
     const fileUrl = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
-    const response = await fetch(fileUrl);
+    const response = await fetchWithTimeout(fileUrl, {}, 20000); // 20 second timeout for photo download
     if (!response.ok) {
       throw new Error(`Failed to download photo: ${response.statusText}`);
     }

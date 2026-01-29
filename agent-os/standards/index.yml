@@ -1,2 +1,10 @@
 # Agent OS Standards Index
 
+standards:
+  - name: coding-standards
+    file: coding-standards.md
+    description: Project structure, naming conventions, TypeScript patterns, grammY usage, Drizzle ORM, LLM integration, services layer, error handling, and code style
+    tags: [architecture, typescript, grammy, drizzle, llm, patterns]
+    version: "0.1"
+    last_updated: "2026-01-30"
+

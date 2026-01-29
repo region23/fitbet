@@ -89,13 +89,13 @@ export async function checkinConversation(
     const text = weightCtx.message?.text;
 
     if (!text) {
-      await ctx.reply("Пожалуйста, введите число.");
+      await weightCtx.reply("Пожалуйста, введите число.");
       continue;
     }
 
     const parsed = parseFloat(text.replace(",", "."));
     if (isNaN(parsed) || parsed < 30 || parsed > 300) {
-      await ctx.reply("Введите корректный вес (30-300 кг).");
+      await weightCtx.reply("Введите корректный вес (30-300 кг).");
       continue;
     }
 
@@ -116,13 +116,13 @@ export async function checkinConversation(
     const text = waistCtx.message?.text;
 
     if (!text) {
-      await ctx.reply("Пожалуйста, введите число.");
+      await waistCtx.reply("Пожалуйста, введите число.");
       continue;
     }
 
     const parsed = parseFloat(text.replace(",", "."));
     if (isNaN(parsed) || parsed < 40 || parsed > 200) {
-      await ctx.reply("Введите корректный обхват (40-200 см).");
+      await waistCtx.reply("Введите корректный обхват (40-200 см).");
       continue;
     }
 
@@ -143,7 +143,7 @@ export async function checkinConversation(
     const photo = photoCtx.message?.photo;
 
     if (!photo || photo.length === 0) {
-      await ctx.reply("Пожалуйста, отправьте фотографию.");
+      await photoCtx.reply("Пожалуйста, отправьте фотографию.");
       continue;
     }
 
@@ -164,7 +164,7 @@ export async function checkinConversation(
     const photo = photoCtx.message?.photo;
 
     if (!photo || photo.length === 0) {
-      await ctx.reply("Пожалуйста, отправьте фотографию.");
+      await photoCtx.reply("Пожалуйста, отправьте фотографию.");
       continue;
     }
 
@@ -185,7 +185,7 @@ export async function checkinConversation(
     const photo = photoCtx.message?.photo;
 
     if (!photo || photo.length === 0) {
-      await ctx.reply("Пожалуйста, отправьте фотографию.");
+      await photoCtx.reply("Пожалуйста, отправьте фотографию.");
       continue;
     }
 
@@ -206,7 +206,7 @@ export async function checkinConversation(
     const photo = photoCtx.message?.photo;
 
     if (!photo || photo.length === 0) {
-      await ctx.reply("Пожалуйста, отправьте фотографию.");
+      await photoCtx.reply("Пожалуйста, отправьте фотографию.");
       continue;
     }
 
@@ -300,16 +300,25 @@ export async function checkinConversation(
       )
     );
 
+    // Load current photos as base64 for LLM
+    const currentPhotosBase64 = await conversation.external(() =>
+      photoService.loadPhotosAsBase64(currentPhotoPaths)
+    );
+
     // Determine if we have start photos
-    let startPhotoPaths = null;
+    let startPhotosBase64 = null;
     if (window.windowNumber > 1 && participant.startPhotoFrontId) {
       // Load from local storage (already saved during onboarding)
-      startPhotoPaths = {
+      const startPhotoPaths = {
         front: `data/photos/${participant.id}/start/front.jpg`,
         left: `data/photos/${participant.id}/start/left.jpg`,
         right: `data/photos/${participant.id}/start/right.jpg`,
         back: `data/photos/${participant.id}/start/back.jpg`,
       };
+
+      startPhotosBase64 = await conversation.external(() =>
+        photoService.loadPhotosAsBase64(startPhotoPaths)
+      );
     }
 
     if (
@@ -332,10 +341,10 @@ export async function checkinConversation(
           durationMonths: challenge.durationMonths,
           startWeight,
           startWaist,
-          startPhotoPaths,
+          startPhotosBase64,
           currentWeight: weight,
           currentWaist: waist,
-          currentPhotoPaths,
+          currentPhotosBase64,
           checkinNumber: window.windowNumber,
           totalCheckins: participant.totalCheckins + 1,
           previousCheckins,

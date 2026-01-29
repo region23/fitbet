@@ -1,6 +1,32 @@
 import { config } from "../config";
 import type { Track } from "../db/schema";
-import { photoService } from "./photo.service";
+
+/**
+ * Fetch with timeout using AbortController
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+}
 
 export interface GoalValidationResult {
   isRealistic: boolean;
@@ -46,7 +72,7 @@ export interface CheckinRecommendationParams {
   // Baseline (start)
   startWeight: number;
   startWaist: number;
-  startPhotoPaths: {
+  startPhotosBase64: {
     front: string;
     left: string;
     right: string;
@@ -56,7 +82,7 @@ export interface CheckinRecommendationParams {
   // Current checkin
   currentWeight: number;
   currentWaist: number;
-  currentPhotoPaths: {
+  currentPhotosBase64: {
     front: string;
     left: string;
     right: string;
@@ -100,20 +126,24 @@ export const llmService = {
     console.log("LLM validation prompt:", prompt);
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.openRouterApiKey}`,
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.openRouterApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-3-flash-preview",
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 3000,
+            temperature: 0.3,
+            stream: false,
+          }),
         },
-        body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 3000,
-          temperature: 0.3,
-          stream: false,
-        }),
-      });
+        30000 // 30 second timeout
+      );
 
       if (!response.ok) {
         console.error("LLM API error:", response.status, await response.text());
@@ -157,20 +187,24 @@ export const llmService = {
     const prompt = buildRecommendationPrompt(params);
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.openRouterApiKey}`,
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.openRouterApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-3-flash-preview",
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 2000,
+            temperature: 0.5,
+            stream: false,
+          }),
         },
-        body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 2000,
-          temperature: 0.5,
-          stream: false,
-        }),
-      });
+        30000 // 30 second timeout
+      );
 
       if (!response.ok) {
         console.error("LLM API error:", response.status, await response.text());
@@ -199,38 +233,37 @@ export const llmService = {
 
     const startTime = Date.now();
 
-    // Load current photos as base64
-    const currentPhotos = await photoService.loadPhotosAsBase64(params.currentPhotoPaths);
-
-    // Load start photos if this is not the first checkin
-    let startPhotos: { front: string; left: string; right: string; back: string } | null = null;
-    if (params.startPhotoPaths) {
-      startPhotos = await photoService.loadPhotosAsBase64(params.startPhotoPaths);
-    }
-
     // Build multimodal prompt
-    const { textPrompt, visionContent } = buildCheckinPrompt(params, currentPhotos, startPhotos);
+    const { textPrompt, visionContent } = buildCheckinPrompt(
+      params,
+      params.currentPhotosBase64,
+      params.startPhotosBase64
+    );
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.openRouterApiKey}`,
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.openRouterApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-3-flash-preview",
+            messages: [
+              {
+                role: "user",
+                content: [{ type: "text", text: textPrompt }, ...visionContent],
+              },
+            ],
+            max_tokens: 4000,
+            temperature: 0.7,
+            stream: false,
+          }),
         },
-        body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: textPrompt }, ...visionContent],
-            },
-          ],
-          max_tokens: 4000,
-          temperature: 0.7,
-          stream: false,
-        }),
-      });
+        45000 // 45 second timeout for vision API
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -417,19 +450,67 @@ function buildCheckinPrompt(
 
   // Build vision content array
   const visionContent = [
-    photoService.createVisionPayload(currentPhotos.front, "Текущее фото: анфас"),
-    photoService.createVisionPayload(currentPhotos.left, "Текущее фото: профиль слева"),
-    photoService.createVisionPayload(currentPhotos.right, "Текущее фото: профиль справа"),
-    photoService.createVisionPayload(currentPhotos.back, "Текущее фото: со спины"),
+    {
+      type: "image_url" as const,
+      image_url: {
+        url: `data:image/jpeg;base64,${currentPhotos.front}`,
+        detail: "low" as const,
+      },
+    },
+    {
+      type: "image_url" as const,
+      image_url: {
+        url: `data:image/jpeg;base64,${currentPhotos.left}`,
+        detail: "low" as const,
+      },
+    },
+    {
+      type: "image_url" as const,
+      image_url: {
+        url: `data:image/jpeg;base64,${currentPhotos.right}`,
+        detail: "low" as const,
+      },
+    },
+    {
+      type: "image_url" as const,
+      image_url: {
+        url: `data:image/jpeg;base64,${currentPhotos.back}`,
+        detail: "low" as const,
+      },
+    },
   ];
 
   // Add start photos if available (for comparison)
   if (startPhotos) {
     visionContent.push(
-      photoService.createVisionPayload(startPhotos.front, "Стартовое фото: анфас"),
-      photoService.createVisionPayload(startPhotos.left, "Стартовое фото: профиль слева"),
-      photoService.createVisionPayload(startPhotos.right, "Стартовое фото: профиль справа"),
-      photoService.createVisionPayload(startPhotos.back, "Стартовое фото: со спины")
+      {
+        type: "image_url" as const,
+        image_url: {
+          url: `data:image/jpeg;base64,${startPhotos.front}`,
+          detail: "low" as const,
+        },
+      },
+      {
+        type: "image_url" as const,
+        image_url: {
+          url: `data:image/jpeg;base64,${startPhotos.left}`,
+          detail: "low" as const,
+        },
+      },
+      {
+        type: "image_url" as const,
+        image_url: {
+          url: `data:image/jpeg;base64,${startPhotos.right}`,
+          detail: "low" as const,
+        },
+      },
+      {
+        type: "image_url" as const,
+        image_url: {
+          url: `data:image/jpeg;base64,${startPhotos.back}`,
+          detail: "low" as const,
+        },
+      }
     );
   }
 

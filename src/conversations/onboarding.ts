@@ -37,15 +37,20 @@ export async function onboardingConversation(
   ctx: BotContext
 ) {
   const userId = ctx.from?.id;
+  console.log(`[Onboarding] >>> CONVERSATION CALLED for user ${userId}, message:`, ctx.message?.text || ctx.callbackQuery?.data || "no-text");
+  console.log(`[Onboarding] >>> Session conversation state:`, JSON.stringify(ctx.session?.conversation || {}).slice(0, 200));
+
   if (!userId) {
     await ctx.reply("Ошибка: не удалось определить пользователя.");
     return;
   }
 
   // Find participant in onboarding status
+  console.log(`[Onboarding] User ${userId} fetching participant data...`);
   let participant = await conversation.external(() =>
     participantService.getOnboardingParticipant(userId)
   );
+  console.log(`[Onboarding] User ${userId} participant found:`, !!participant);
 
   if (!participant) {
     await ctx.reply(
@@ -191,13 +196,13 @@ export async function onboardingConversation(
       const text = weightCtx.message?.text;
 
       if (!text) {
-        await ctx.reply("Пожалуйста, введите число.");
+        await weightCtx.reply("Пожалуйста, введите число.");
         continue;
       }
 
       const parsed = parseFloat(text.replace(",", "."));
       if (isNaN(parsed) || parsed < 30 || parsed > 300) {
-        await ctx.reply("Введите корректный вес (30-300 кг).");
+        await weightCtx.reply("Введите корректный вес (30-300 кг).");
         continue;
       }
 
@@ -228,13 +233,13 @@ export async function onboardingConversation(
       const text = waistCtx.message?.text;
 
       if (!text) {
-        await ctx.reply("Пожалуйста, введите число.");
+        await waistCtx.reply("Пожалуйста, введите число.");
         continue;
       }
 
       const parsed = parseFloat(text.replace(",", "."));
       if (isNaN(parsed) || parsed < 40 || parsed > 200) {
-        await ctx.reply("Введите корректный обхват (40-200 см).");
+        await waistCtx.reply("Введите корректный обхват (40-200 см).");
         continue;
       }
 
@@ -265,13 +270,13 @@ export async function onboardingConversation(
       const text = heightCtx.message?.text;
 
       if (!text) {
-        await ctx.reply("Пожалуйста, введите число.");
+        await heightCtx.reply("Пожалуйста, введите число.");
         continue;
       }
 
       const parsed = parseFloat(text.replace(",", "."));
       if (isNaN(parsed) || parsed < 100 || parsed > 250) {
-        await ctx.reply("Введите корректный рост (100-250 см).");
+        await heightCtx.reply("Введите корректный рост (100-250 см).");
         continue;
       }
 
@@ -313,7 +318,7 @@ export async function onboardingConversation(
       const photo = photoCtx.message?.photo;
 
       if (!photo || photo.length === 0) {
-        await ctx.reply("Пожалуйста, отправьте фотографию.");
+        await photoCtx.reply("Пожалуйста, отправьте фотографию.");
         continue;
       }
 
@@ -335,7 +340,7 @@ export async function onboardingConversation(
       const photo = photoCtx.message?.photo;
 
       if (!photo || photo.length === 0) {
-        await ctx.reply("Пожалуйста, отправьте фотографию.");
+        await photoCtx.reply("Пожалуйста, отправьте фотографию.");
         continue;
       }
 
@@ -357,7 +362,7 @@ export async function onboardingConversation(
       const photo = photoCtx.message?.photo;
 
       if (!photo || photo.length === 0) {
-        await ctx.reply("Пожалуйста, отправьте фотографию.");
+        await photoCtx.reply("Пожалуйста, отправьте фотографию.");
         continue;
       }
 
@@ -379,7 +384,7 @@ export async function onboardingConversation(
       const photo = photoCtx.message?.photo;
 
       if (!photo || photo.length === 0) {
-        await ctx.reply("Пожалуйста, отправьте фотографию.");
+        await photoCtx.reply("Пожалуйста, отправьте фотографию.");
         continue;
       }
 
@@ -414,16 +419,19 @@ export async function onboardingConversation(
           "start"
         )
       );
+      console.log(`[Onboarding] User ${userId} saved start photos locally`);
     } catch (error) {
-      console.error("Error saving start photos locally:", error);
+      console.error(`[Onboarding] User ${userId} error saving start photos locally:`, error);
       // Don't break onboarding flow if local save fails
     }
   }
 
   // === Check if goal already exists ===
+  console.log(`[Onboarding] User ${userId} checking for existing goal...`);
   const existingGoal = await conversation.external(() =>
     goalService.findByParticipantId(participant.id)
   );
+  console.log(`[Onboarding] User ${userId} existing goal found:`, !!existingGoal);
 
   let targetWeight = 0;
   let targetWaist = 0;
@@ -450,12 +458,15 @@ export async function onboardingConversation(
         height,
         durationMonths: challenge.durationMonths,
       });
+      console.log(`[Onboarding] User ${userId} calculated recommended goals:`, recommendedGoals);
 
       // === STEP 9: Target weight ===
+      console.log(`[Onboarding] User ${userId} creating weight keyboard...`);
       const weightKeyboard = new InlineKeyboard().text(
         `✨ Использовать ${recommendedGoals.targetWeight} кг`,
         `use_weight_${recommendedGoals.targetWeight}`
       );
+      console.log(`[Onboarding] User ${userId} sending weight prompt message...`);
 
       await ctx.reply(
         `🎯 *Целевой вес*\n\n` +
@@ -468,50 +479,69 @@ export async function onboardingConversation(
           parse_mode: "Markdown",
         }
       );
+      console.log(`[Onboarding] User ${userId} weight prompt sent, entering wait loop...`);
 
       while (true) {
+        console.log(`[Onboarding] User ${userId} waiting for weight input...`);
         const targetCtx = await conversation.wait();
+        console.log(`[Onboarding] User ${userId} received weight input:`, targetCtx.message?.text || targetCtx.callbackQuery?.data);
 
         if (targetCtx.callbackQuery?.data?.startsWith("use_weight_")) {
+          console.log(`[Onboarding] User ${userId} callback query for weight button detected`);
           targetWeight = parseFloat(targetCtx.callbackQuery.data.replace("use_weight_", ""));
+          console.log(`[Onboarding] User ${userId} answering callback query...`);
           await targetCtx.answerCallbackQuery();
+          console.log(`[Onboarding] User ${userId} callback answered, editing message...`);
           await targetCtx.editMessageText(`✅ Целевой вес: ${targetWeight} кг`);
+          console.log(`[Onboarding] User ${userId} message edited, breaking from weight loop`);
           break;
         }
 
         const text = targetCtx.message?.text;
 
         if (!text) {
-          await ctx.reply("Пожалуйста, введите число или нажмите кнопку.");
+          console.log(`[Onboarding] User ${userId} no text in message, asking again...`);
+          await targetCtx.reply("Пожалуйста, введите число или нажмите кнопку.");
           continue;
         }
 
         const parsed = parseFloat(text.replace(",", "."));
         if (isNaN(parsed) || parsed < 30 || parsed > 300) {
-          await ctx.reply("Введите корректный вес (30-300 кг).");
+          console.log(`[Onboarding] User ${userId} invalid weight: ${parsed}`);
+          await targetCtx.reply("Введите корректный вес (30-300 кг).");
           continue;
         }
 
         if (track === "cut" && parsed >= currentWeight) {
-          await ctx.reply("Для Cut целевой вес должен быть меньше текущего.");
+          console.log(`[Onboarding] User ${userId} weight too high for cut: ${parsed} >= ${currentWeight}`);
+          await targetCtx.reply("Для Cut целевой вес должен быть меньше текущего.");
           continue;
         }
 
         if (track === "bulk" && parsed <= currentWeight) {
-          await ctx.reply("Для Bulk целевой вес должен быть больше текущего.");
+          console.log(`[Onboarding] User ${userId} weight too low for bulk: ${parsed} <= ${currentWeight}`);
+          await targetCtx.reply("Для Bulk целевой вес должен быть больше текущего.");
           continue;
         }
 
         targetWeight = parsed;
-        await ctx.reply(`✅ Целевой вес: ${targetWeight} кг`);
+        console.log(`[Onboarding] User ${userId} valid weight accepted: ${targetWeight}`);
+        console.log(`[Onboarding] User ${userId} sending weight confirmation message...`);
+        await targetCtx.reply(`✅ Целевой вес: ${targetWeight} кг`);
+        console.log(`[Onboarding] User ${userId} weight confirmation sent, breaking from loop`);
         break;
       }
+
+      console.log(`[Onboarding] User ${userId} exited weight loop, moving to waist step`);
+      console.log(`[Onboarding] User ${userId} recommendedGoals.targetWaist:`, recommendedGoals.targetWaist);
+      console.log(`[Onboarding] User ${userId} recommendedGoals.waistReason:`, recommendedGoals.waistReason);
 
       // === STEP 10: Target waist ===
       const waistKeyboard = new InlineKeyboard().text(
         `✨ Использовать ${recommendedGoals.targetWaist} см`,
         `use_waist_${recommendedGoals.targetWaist}`
       );
+      console.log(`[Onboarding] User ${userId} created waist keyboard`);
 
       await ctx.reply(
         `🎯 *Целевой обхват талии*\n\n` +
@@ -524,54 +554,83 @@ export async function onboardingConversation(
           parse_mode: "Markdown",
         }
       );
+      console.log(`[Onboarding] User ${userId} sent waist prompt, waiting for input`);
 
       while (true) {
+        console.log(`[Onboarding] User ${userId} waiting for waist input...`);
         const targetCtx = await conversation.wait();
+        console.log(`[Onboarding] User ${userId} received waist input:`, targetCtx.message?.text || targetCtx.callbackQuery?.data);
 
         if (targetCtx.callbackQuery?.data?.startsWith("use_waist_")) {
+          console.log(`[Onboarding] User ${userId} callback query for waist button detected`);
           targetWaist = parseFloat(targetCtx.callbackQuery.data.replace("use_waist_", ""));
+          console.log(`[Onboarding] User ${userId} answering waist callback query...`);
           await targetCtx.answerCallbackQuery();
+          console.log(`[Onboarding] User ${userId} waist callback answered, editing message...`);
           await targetCtx.editMessageText(`✅ Целевой обхват талии: ${targetWaist} см`);
+          console.log(`[Onboarding] User ${userId} waist message edited, breaking from waist loop`);
           break;
         }
 
         const text = targetCtx.message?.text;
 
         if (!text) {
-          await ctx.reply("Пожалуйста, введите число или нажмите кнопку.");
+          console.log(`[Onboarding] User ${userId} no text in waist message, asking again...`);
+          await targetCtx.reply("Пожалуйста, введите число или нажмите кнопку.");
           continue;
         }
 
         const parsed = parseFloat(text.replace(",", "."));
         if (isNaN(parsed) || parsed < 40 || parsed > 200) {
-          await ctx.reply("Введите корректный обхват (40-200 см).");
+          console.log(`[Onboarding] User ${userId} invalid waist: ${parsed}`);
+          await targetCtx.reply("Введите корректный обхват (40-200 см).");
           continue;
         }
 
         if (track === "cut" && parsed >= currentWaist) {
-          await ctx.reply("Для Cut целевой обхват должен быть меньше текущего.");
+          console.log(`[Onboarding] User ${userId} waist too high for cut: ${parsed} >= ${currentWaist}`);
+          await targetCtx.reply("Для Cut целевой обхват должен быть меньше текущего.");
           continue;
         }
 
         targetWaist = parsed;
-        await ctx.reply(`✅ Целевой обхват талии: ${targetWaist} см`);
+        console.log(`[Onboarding] User ${userId} valid waist accepted: ${targetWaist}`);
+        console.log(`[Onboarding] User ${userId} sending waist confirmation message...`);
+        await targetCtx.reply(`✅ Целевой обхват талии: ${targetWaist} см`);
+        console.log(`[Onboarding] User ${userId} waist confirmation sent, breaking from loop`);
         break;
       }
 
       // === LLM Validation ===
-      await ctx.reply("🤖 Проверяю реалистичность цели...");
+      let validation;
+      try {
+        console.log(`[Onboarding] User ${userId} starting LLM goal validation...`);
+        await ctx.reply("🤖 Проверяю реалистичность цели...");
 
-      const validation = await conversation.external(() =>
-        llmService.validateGoal({
-          track,
-          currentWeight,
-          currentWaist,
-          height,
-          targetWeight,
-          targetWaist,
-          durationMonths: challenge.durationMonths,
-        })
-      );
+        validation = await conversation.external(() =>
+          llmService.validateGoal({
+            track,
+            currentWeight,
+            currentWaist,
+            height,
+            targetWeight,
+            targetWaist,
+            durationMonths: challenge.durationMonths,
+          })
+        );
+
+        console.log(`[Onboarding] User ${userId} LLM validation result: ${validation.result}`);
+      } catch (error) {
+        console.error(`[Onboarding] User ${userId} LLM validation failed:`, error);
+        await ctx.reply(
+          "⚠️ Не удалось проверить цель через LLM. Цель будет принята автоматически."
+        );
+        validation = {
+          isRealistic: true,
+          result: "realistic" as const,
+          feedback: "Цель принята (LLM недоступен)",
+        };
+      }
 
       // === Save or update goal ===
       try {
@@ -708,7 +767,7 @@ export async function onboardingConversation(
         const text = commitCtx.message?.text;
 
         if (!text) {
-          await ctx.reply("Пожалуйста, введите номера обязательств.");
+          await commitCtx.reply("Пожалуйста, введите номера обязательств.");
           continue;
         }
 
@@ -718,7 +777,7 @@ export async function onboardingConversation(
           .filter((n) => !isNaN(n) && n >= 1 && n <= templates.length);
 
         if (numbers.length < 2 || numbers.length > 3) {
-          await ctx.reply("Выберите от 2 до 3 обязательств.");
+          await commitCtx.reply("Выберите от 2 до 3 обязательств.");
           continue;
         }
 

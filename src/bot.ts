@@ -62,7 +62,7 @@ export function createBot() {
   // Logging middleware
   bot.use(loggerMiddleware);
 
-  // Session middleware
+  // Session middleware - use default in-memory storage
   bot.use(
     session({
       initial: createInitialSessionData,

@@ -2,12 +2,14 @@ import type { BotContext } from "../../types";
 import { participantService } from "../../services";
 
 export async function startCommand(ctx: BotContext) {
+  console.log(`[StartCommand] Called for user ${ctx.from?.id}, message:`, ctx.message?.text || ctx.callbackQuery?.data);
   const isPrivateChat = ctx.chat?.type === "private";
   const userId = ctx.from?.id;
 
   if (isPrivateChat && userId) {
     // Check if user has a pending check-in session
     if (ctx.session.checkin?.windowId) {
+      console.log(`[StartCommand] User ${userId} has pending checkin, entering checkinConversation`);
       await ctx.conversation.enter("checkinConversation");
       return;
     }
@@ -15,6 +17,7 @@ export async function startCommand(ctx: BotContext) {
     // Check if user is in onboarding
     const onboardingParticipant = await participantService.getOnboardingParticipant(userId);
     if (onboardingParticipant) {
+      console.log(`[StartCommand] User ${userId} has onboarding participant, entering onboardingConversation`);
       await ctx.conversation.enter("onboardingConversation");
       return;
     }
