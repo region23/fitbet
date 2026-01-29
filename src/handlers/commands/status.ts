@@ -12,26 +12,71 @@ export async function statusCommand(ctx: BotContext) {
   }
 
   if (isPrivateChat) {
-    // Show all user's participations
-    // For simplicity, we'll show the onboarding participant if exists
-    const onboarding = await participantService.getOnboardingParticipant(userId);
+    // Find all user's participations
+    const participations = await participantService.findByUserId(userId);
 
-    if (onboarding) {
-      const challenge = await challengeService.findById(onboarding.challengeId);
+    if (participations.length === 0) {
       await ctx.reply(
-        `📋 *Ваш статус:*\n\n` +
-          `Челлендж: ${challenge?.chatTitle || "Неизвестно"}\n` +
-          `Статус: Онбординг не завершён\n\n` +
-          `Напишите /start чтобы продолжить онбординг.`,
-        { parse_mode: "Markdown" }
+        "У вас нет активных челленджей.\n" +
+          "Присоединитесь к челленджу через кнопку в групповом чате."
       );
       return;
     }
 
-    await ctx.reply(
-      "У вас нет активных челленджей.\n" +
-        "Присоединитесь к челленджу через кнопку в групповом чате."
-    );
+    let message = "📋 *Ваши челленджи:*\n\n";
+
+    for (const p of participations) {
+      const challenge = await challengeService.findById(p.challengeId);
+      if (!challenge) continue;
+
+      let statusText = "";
+      let action = "";
+
+      switch (p.status) {
+        case "onboarding":
+          statusText = "⏳ Онбординг не завершён";
+          action = "Напишите /start чтобы продолжить";
+          break;
+        case "pending_payment":
+          statusText = "💳 Ожидает оплаты";
+          action = "Оплатите и нажмите 'Я оплатил' в чате";
+          break;
+        case "payment_marked":
+          statusText = "⏳ Ожидает подтверждения оплаты";
+          break;
+        case "active":
+          statusText = `✅ Активен (${p.completedCheckins}/${p.totalCheckins} чек-инов)`;
+          break;
+        case "dropped":
+          statusText = "🚫 Выбыл";
+          break;
+        case "disqualified":
+          statusText = "❌ Дисквалифицирован";
+          break;
+        case "completed":
+          statusText = "🏁 Завершён";
+          break;
+      }
+
+      message += `*${challenge.chatTitle}*\n`;
+      message += `Статус: ${statusText}\n`;
+
+      if (p.startWeight && p.startWaist) {
+        const goal = await goalService.findByParticipantId(p.id);
+        if (goal?.targetWeight && goal?.targetWaist) {
+          message += `Старт: ${p.startWeight} кг / ${p.startWaist} см\n`;
+          message += `Цель: ${goal.targetWeight} кг / ${goal.targetWaist} см\n`;
+        }
+      }
+
+      if (action) {
+        message += `_${action}_\n`;
+      }
+
+      message += "\n";
+    }
+
+    await ctx.reply(message, { parse_mode: "Markdown" });
     return;
   }
 

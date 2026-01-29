@@ -36,6 +36,13 @@ export const participantService = {
       .where(eq(schema.participants.challengeId, challengeId));
   },
 
+  async findByUserId(userId: number) {
+    return db
+      .select()
+      .from(schema.participants)
+      .where(eq(schema.participants.userId, userId));
+  },
+
   async findActiveByChallenge(challengeId: number) {
     return db
       .select()

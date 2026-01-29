@@ -47,8 +47,9 @@ export const llmService = {
         body: JSON.stringify({
           model: "moonshotai/kimi-k2.5",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 500,
+          max_tokens: 1000,
           temperature: 0.3,
+          stream: false,
         }),
       });
 
@@ -62,9 +63,10 @@ export const llmService = {
       }
 
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || "";
+      console.log("LLM API full response:", JSON.stringify(data, null, 2));
 
-      console.log("LLM validation response:", content);
+      const content = data.choices?.[0]?.message?.content || "";
+      console.log("LLM validation response content:", content);
 
       return parseValidationResponse(content);
     } catch (error) {
@@ -102,8 +104,9 @@ export const llmService = {
         body: JSON.stringify({
           model: "moonshotai/kimi-k2.5",
           messages: [{ role: "user", content: prompt }],
-          max_tokens: 400,
+          max_tokens: 800,
           temperature: 0.5,
+          stream: false,
         }),
       });
 
