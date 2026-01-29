@@ -54,4 +54,10 @@ export const goalService = {
       .returning();
     return updated;
   },
+
+  async deleteByParticipantId(participantId: number) {
+    await db
+      .delete(schema.goals)
+      .where(eq(schema.goals.participantId, participantId));
+  },
 };

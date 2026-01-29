@@ -60,19 +60,25 @@ export const participantService = {
   async updateOnboardingData(
     id: number,
     data: {
-      track?: Track;
-      startWeight?: number;
-      startWaist?: number;
-      height?: number;
-      startPhotoFrontId?: string;
-      startPhotoLeftId?: string;
-      startPhotoRightId?: string;
-      startPhotoBackId?: string;
+      track?: Track | null;
+      startWeight?: number | null;
+      startWaist?: number | null;
+      height?: number | null;
+      startPhotoFrontId?: string | null;
+      startPhotoLeftId?: string | null;
+      startPhotoRightId?: string | null;
+      startPhotoBackId?: string | null;
     }
   ) {
+    // Convert undefined to null for database update
+    const updateData: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+      updateData[key] = value === undefined ? null : value;
+    }
+
     const [updated] = await db
       .update(schema.participants)
-      .set(data)
+      .set(updateData)
       .where(eq(schema.participants.id, id))
       .returning();
     return updated;

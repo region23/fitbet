@@ -35,6 +35,8 @@ export const llmService = {
 
     const prompt = buildValidationPrompt(params);
 
+    console.log("LLM validation prompt:", prompt);
+
     try {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -61,6 +63,8 @@ export const llmService = {
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || "";
+
+      console.log("LLM validation response:", content);
 
       return parseValidationResponse(content);
     } catch (error) {

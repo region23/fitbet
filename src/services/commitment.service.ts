@@ -55,4 +55,10 @@ export const commitmentService = {
 
     return commitments.map((c) => c.template);
   },
+
+  async deleteParticipantCommitments(participantId: number) {
+    await db
+      .delete(schema.participantCommitments)
+      .where(eq(schema.participantCommitments.participantId, participantId));
+  },
 };
