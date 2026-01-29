@@ -1,0 +1,20 @@
+{
+  "version": "5",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1769701079484,
+      "tag": "0000_fine_roland_deschain",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1738159200000,
+      "tag": "0001_expand_photos",
+      "breakpoints": true
+    }
+  ]
+}

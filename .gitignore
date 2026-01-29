@@ -30,7 +30,7 @@ Thumbs.db
 logs/
 
 # Drizzle
-drizzle/meta/
+# drizzle/meta/ - NEEDED for migrations, do not ignore!
 
 # Bun
 bun.lockb
