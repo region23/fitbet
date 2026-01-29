@@ -1,0 +1,15 @@
+services:
+  fitbet:
+    build: .
+    container_name: fitbet
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - fitbet_data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/fitbet.db
+
+volumes:
+  fitbet_data:
