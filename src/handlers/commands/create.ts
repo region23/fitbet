@@ -1,6 +1,8 @@
 import type { BotContext } from "../../types";
 import { challengeService, participantService } from "../../services";
 import { InlineKeyboard } from "grammy";
+import { config } from "../../config";
+import { formatDuration } from "../../utils/duration";
 
 export async function createCommand(ctx: BotContext) {
   const chatType = ctx.chat?.type;
@@ -29,7 +31,10 @@ export async function createCommand(ctx: BotContext) {
       let message =
         `📊 *В этом чате уже есть активный челлендж*\n\n` +
         `Дождитесь его завершения.\n\n` +
-        `📅 Длительность: ${existingChallenge.durationMonths} месяцев\n` +
+        `📅 Длительность: ${formatDuration(
+          existingChallenge.durationMonths,
+          config.challengeDurationUnit
+        )}\n` +
         `💰 Ставка: ${existingChallenge.stakeAmount}₽\n` +
         `📊 Порог дисциплины: ${Math.round(existingChallenge.disciplineThreshold * 100)}%\n` +
         `⏭️ Макс. пропусков: ${existingChallenge.maxSkips}`;
@@ -69,5 +74,5 @@ export async function createCommand(ctx: BotContext) {
   }
 
   // Start the challenge setup conversation
-  await ctx.conversation.enter("challengeSetupConversation");
+  await ctx.conversation.reenter("challengeSetupConversation");
 }

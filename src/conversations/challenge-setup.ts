@@ -2,6 +2,8 @@ import type { Conversation } from "@grammyjs/conversations";
 import type { BotContext } from "../types";
 import { challengeService } from "../services";
 import { InlineKeyboard } from "grammy";
+import { config } from "../config";
+import { formatDuration } from "../utils/duration";
 
 // ForceReply makes Telegram show reply interface to the user
 const forceReply = { force_reply: true as const, selective: true as const };
@@ -41,8 +43,8 @@ export async function challengeSetupConversation(
 
   // Step 1: Duration
   const durationKeyboard = new InlineKeyboard()
-    .text("6 месяцев", "setup_duration_6")
-    .text("12 месяцев", "setup_duration_12");
+    .text(formatDuration(6, config.challengeDurationUnit), "setup_duration_6")
+    .text(formatDuration(12, config.challengeDurationUnit), "setup_duration_12");
 
   await ctx.reply("📅 *Выберите длительность челленджа:*", {
     reply_markup: durationKeyboard,
@@ -66,7 +68,9 @@ export async function challengeSetupConversation(
     if (data === "setup_duration_6" || data === "setup_duration_12") {
       durationMonths = data === "setup_duration_6" ? 6 : 12;
       await durationCtx.answerCallbackQuery();
-      await durationCtx.editMessageText(`✅ Длительность: ${durationMonths} месяцев`);
+      await durationCtx.editMessageText(
+        `✅ Длительность: ${formatDuration(durationMonths, config.challengeDurationUnit)}`
+      );
       break;
     }
 
@@ -156,7 +160,7 @@ export async function challengeSetupConversation(
 
   await ctx.reply(
     "⏭️ *Максимум пропусков до дисквалификации:*\n" +
-      "(подряд пропущенных чек-инов)",
+      "(всего пропущенных чек-инов)",
     {
       reply_markup: skipsKeyboard,
       parse_mode: "Markdown",
@@ -210,7 +214,7 @@ export async function challengeSetupConversation(
 
   await ctx.reply(
     `🎯 *Челлендж создан!*\n\n` +
-      `📅 Длительность: ${durationMonths} месяцев\n` +
+      `📅 Длительность: ${formatDuration(durationMonths, config.challengeDurationUnit)}\n` +
       `💰 Ставка: ${stakeAmount}₽\n` +
       `📊 Порог дисциплины: ${disciplineThreshold * 100}%\n` +
       `⏭️ Макс. пропусков: ${maxSkips}\n\n` +

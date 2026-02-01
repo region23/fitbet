@@ -6,6 +6,7 @@ import {
   paymentService,
 } from "../../services";
 import { InlineKeyboard } from "grammy";
+import { selectBankHolderWinner } from "../../services/bankholder-election";
 
 export async function handleVoteCallback(ctx: BotContext) {
   const callbackData = ctx.callbackQuery?.data;
@@ -133,31 +134,19 @@ async function finalizeElection(
   // Get all votes
   const votes = await bankHolderService.getVotes(electionId);
 
-  // Count votes
-  const voteCount = new Map<number, number>();
-  for (const vote of votes) {
-    const count = voteCount.get(vote.votedForId) || 0;
-    voteCount.set(vote.votedForId, count + 1);
-  }
+  const eligibleParticipants = await participantService.findByChallengeId(challengeId);
+  const eligible = eligibleParticipants.filter((p) => p.status !== "onboarding");
+  const result = selectBankHolderWinner(eligible, votes, challenge.creatorId);
 
-  // Find winner (max votes) - only among participants
-  let winnerId = 0;
-  let maxVotes = 0;
-
-  for (const [candidateId, count] of voteCount.entries()) {
-    if (count > maxVotes) {
-      maxVotes = count;
-      winnerId = candidateId;
-    }
-  }
-
-  if (!winnerId) {
+  if (!result) {
     await ctx.api.sendMessage(
       challenge.chatId,
       "⚠️ Ошибка при подсчёте голосов. Попробуйте снова."
     );
     return;
   }
+
+  const { winnerId, maxVotes } = result;
 
   // Verify winner is a participant
   const winner = await participantService.findByUserAndChallenge(

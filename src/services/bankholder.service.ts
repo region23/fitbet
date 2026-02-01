@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { NewBankHolderElection, ElectionStatus, NewBankHolderVote } from "../db/schema";
 
@@ -30,6 +30,18 @@ export const bankHolderService = {
         )
       );
     return election;
+  },
+
+  async getInProgressBefore(cutoff: Date) {
+    return db
+      .select()
+      .from(schema.bankHolderElections)
+      .where(
+        and(
+          eq(schema.bankHolderElections.status, "in_progress"),
+          lt(schema.bankHolderElections.createdAt, cutoff)
+        )
+      );
   },
 
   async completeElection(electionId: number) {

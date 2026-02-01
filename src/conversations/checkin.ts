@@ -1,4 +1,5 @@
 import type { Conversation } from "@grammyjs/conversations";
+import path from "node:path";
 import type { BotContext } from "../types";
 import {
   participantService,
@@ -10,6 +11,8 @@ import {
   photoService,
   checkinRecommendationService,
 } from "../services";
+import { config } from "../config";
+import { durationToMonths } from "../utils/duration";
 
 type CheckinConversation = Conversation<BotContext>;
 
@@ -38,6 +41,17 @@ export async function checkinConversation(
   );
 
   if (!window || window.status !== "open") {
+    if (window) {
+      const participant = await conversation.external(() =>
+        participantService.findByUserAndChallenge(userId, window.challengeId)
+      );
+      if (participant?.pendingCheckinWindowId === windowId) {
+        await conversation.external(() =>
+          participantService.clearPendingCheckin(participant.id)
+        );
+      }
+    }
+
     await ctx.reply("Окно чек-ина закрыто или не найдено.");
     ctx.session.checkin = undefined;
     return;
@@ -57,9 +71,22 @@ export async function checkinConversation(
   );
 
   if (!participant || participant.status !== "active") {
+    if (participant?.pendingCheckinWindowId === windowId) {
+      await conversation.external(() =>
+        participantService.clearPendingCheckin(participant.id)
+      );
+    }
     await ctx.reply("Вы не являетесь активным участником этого челленджа.");
     return;
   }
+
+  const clearPending = async () => {
+    if (participant.pendingCheckinWindowId === windowId) {
+      await conversation.external(() =>
+        participantService.clearPendingCheckin(participant.id)
+      );
+    }
+  };
 
   // Check if already submitted
   const existingCheckin = await conversation.external(() =>
@@ -68,6 +95,7 @@ export async function checkinConversation(
 
   if (existingCheckin) {
     await ctx.reply("Вы уже сдали чек-ин для этого окна.");
+    await clearPending();
     ctx.session.checkin = undefined;
     return;
   }
@@ -230,10 +258,20 @@ export async function checkinConversation(
     })
   );
 
+  if (!checkin) {
+    await ctx.reply("Вы уже сдали чек-ин для этого окна.");
+    await clearPending();
+    ctx.session.checkin = undefined;
+    return;
+  }
+
   // Update participant's check-in stats
   await conversation.external(() =>
     participantService.incrementCheckins(participant.id, true)
   );
+
+  // Clear pending check-in handoff
+  await clearPending();
 
   // Calculate progress
   const startWeight = participant.startWeight || weight;
@@ -309,11 +347,16 @@ export async function checkinConversation(
     let startPhotosBase64 = null;
     if (window.windowNumber > 1 && participant.startPhotoFrontId) {
       // Load from local storage (already saved during onboarding)
+      const startDir = path.join(
+        config.photosDirectory,
+        participant.id.toString(),
+        "start"
+      );
       const startPhotoPaths = {
-        front: `data/photos/${participant.id}/start/front.jpg`,
-        left: `data/photos/${participant.id}/start/left.jpg`,
-        right: `data/photos/${participant.id}/start/right.jpg`,
-        back: `data/photos/${participant.id}/start/back.jpg`,
+        front: path.join(startDir, "front.jpg"),
+        left: path.join(startDir, "left.jpg"),
+        right: path.join(startDir, "right.jpg"),
+        back: path.join(startDir, "back.jpg"),
       };
 
       startPhotosBase64 = await conversation.external(() =>
@@ -332,13 +375,18 @@ export async function checkinConversation(
       await ctx.reply("Продолжайте в том же духе! 💪");
     } else {
       // Call LLM service
+      const durationMonthsForLLM = Math.max(
+        0.25,
+        durationToMonths(challenge.durationMonths, config.challengeDurationUnit)
+      );
+
       const recommendation = await conversation.external(() =>
         llmService.getCheckinRecommendations({
           track: participant.track!,
           height: participant.height!,
           targetWeight: goal.targetWeight!,
           targetWaist: goal.targetWaist!,
-          durationMonths: challenge.durationMonths,
+          durationMonths: durationMonthsForLLM,
           startWeight,
           startWaist,
           startPhotosBase64,

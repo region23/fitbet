@@ -12,6 +12,8 @@ import {
 } from "../services";
 import { InlineKeyboard } from "grammy";
 import type { Track, Participant } from "../db/schema";
+import { config } from "../config";
+import { durationToMonths, formatDuration } from "../utils/duration";
 
 type OnboardingConversation = Conversation<BotContext>;
 
@@ -32,13 +34,23 @@ function getOnboardingProgress(participant: Participant) {
   };
 }
 
+function takePendingText(ctx: BotContext): string | undefined {
+  const pending = ctx.session.onboarding?.pendingText;
+  if (!pending) {
+    return undefined;
+  }
+
+  ctx.session.onboarding!.pendingText = undefined;
+  const trimmed = pending.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function onboardingConversation(
   conversation: OnboardingConversation,
   ctx: BotContext
 ) {
   const userId = ctx.from?.id;
   console.log(`[Onboarding] >>> CONVERSATION CALLED for user ${userId}, message:`, ctx.message?.text || ctx.callbackQuery?.data || "no-text");
-  console.log(`[Onboarding] >>> Session conversation state:`, JSON.stringify(ctx.session?.conversation || {}).slice(0, 200));
 
   if (!userId) {
     await ctx.reply("Ошибка: не удалось определить пользователя.");
@@ -72,8 +84,27 @@ export async function onboardingConversation(
   const progress = getOnboardingProgress(participant);
   let shouldRestart = false;
 
+  // IMPORTANT: conversations are replayed on every update. We must keep the early
+  // branching deterministic within a single onboarding run.
+  ctx.session.onboarding ??= {};
+  if (ctx.session.onboarding.resumeParticipantId !== participant.id) {
+    ctx.session.onboarding = {
+      resumeParticipantId: participant.id,
+      challengeId: participant.challengeId,
+    };
+  }
+
+  if (ctx.session.onboarding.resumePromptEnabled === undefined) {
+    const hasAnyProgress = progress.hasTrack || progress.hasMetrics || progress.hasPhotos;
+    ctx.session.onboarding.resumePromptEnabled = hasAnyProgress;
+    ctx.session.onboarding.resumePromptComplete = !hasAnyProgress;
+  }
+
   // If some data exists, ask whether to continue or restart
-  if (progress.hasTrack || progress.hasMetrics || progress.hasPhotos) {
+  if (
+    ctx.session.onboarding.resumePromptEnabled &&
+    !ctx.session.onboarding.resumePromptComplete
+  ) {
     let progressSummary = "📋 *У вас есть сохранённый прогресс:*\n\n";
 
     if (progress.track) {
@@ -101,38 +132,64 @@ export async function onboardingConversation(
       parse_mode: "Markdown",
     });
 
-    const choiceCtx = await conversation.waitForCallbackQuery(/^onboarding_(continue|restart)$/);
-    await choiceCtx.answerCallbackQuery();
+    let decided = false;
+    while (!decided) {
+      const choiceCtx = await conversation.wait();
 
-    if (choiceCtx.callbackQuery.data === "onboarding_restart") {
-      shouldRestart = true;
-      await choiceCtx.editMessageText("🔄 Начинаем заново...");
+      if (choiceCtx.callbackQuery?.data === "onboarding_restart") {
+        await choiceCtx.answerCallbackQuery();
+        ctx.session.onboarding.resumePromptComplete = true;
+        shouldRestart = true;
+        await choiceCtx.editMessageText("🔄 Начинаем заново...");
+        decided = true;
 
-      // Reset participant data
-      await conversation.external(() =>
-        participantService.updateOnboardingData(participant.id, {
-          track: undefined,
-          startWeight: undefined,
-          startWaist: undefined,
-          height: undefined,
-          startPhotoFrontId: undefined,
-          startPhotoLeftId: undefined,
-          startPhotoRightId: undefined,
-          startPhotoBackId: undefined,
-        })
-      );
+        // Reset participant data
+        await conversation.external(() =>
+          participantService.updateOnboardingData(participant.id, {
+            track: undefined,
+            startWeight: undefined,
+            startWaist: undefined,
+            height: undefined,
+            startPhotoFrontId: undefined,
+            startPhotoLeftId: undefined,
+            startPhotoRightId: undefined,
+            startPhotoBackId: undefined,
+          })
+        );
 
-      // Delete existing goal if any
-      await conversation.external(() =>
-        goalService.deleteByParticipantId(participant.id)
-      );
+        // Delete existing goal if any
+        await conversation.external(() =>
+          goalService.deleteByParticipantId(participant.id)
+        );
 
-      // Delete existing commitments if any
-      await conversation.external(() =>
-        commitmentService.deleteParticipantCommitments(participant.id)
-      );
-    } else {
-      await choiceCtx.editMessageText("▶️ Продолжаем с того места, где остановились...");
+        // Delete existing commitments if any
+        await conversation.external(() =>
+          commitmentService.deleteParticipantCommitments(participant.id)
+        );
+        break;
+      }
+
+      if (choiceCtx.callbackQuery?.data === "onboarding_continue") {
+        await choiceCtx.answerCallbackQuery();
+        ctx.session.onboarding.resumePromptComplete = true;
+        await choiceCtx.editMessageText("▶️ Продолжаем с того места, где остановились...");
+        decided = true;
+        break;
+      }
+
+      if (choiceCtx.message?.text) {
+        ctx.session.onboarding.resumePromptComplete = true;
+        const pendingText = choiceCtx.message.text.trim();
+        if (pendingText.length > 0 && !pendingText.startsWith("/")) {
+          ctx.session.onboarding.pendingText = pendingText;
+        }
+        await choiceCtx.reply(
+          "▶️ Продолжаем с того места, где остановились.\n" +
+            "Сообщение принято; если это значение нужно для следующего шага, я использую его."
+        );
+        decided = true;
+        break;
+      }
     }
   }
 
@@ -141,8 +198,12 @@ export async function onboardingConversation(
     await ctx.reply(
       `🎯 *Добро пожаловать в челлендж!*\n\n` +
         `Чат: ${challenge.chatTitle}\n` +
-        `Длительность: ${challenge.durationMonths} месяцев\n` +
+        `Длительность: ${formatDuration(
+          challenge.durationMonths,
+          config.challengeDurationUnit
+        )}\n` +
         `Ставка: ${challenge.stakeAmount}₽\n\n` +
+        `⏳ На завершение онбординга есть 48 часов.\n\n` +
         `Давайте настроим ваш профиль.`,
       { parse_mode: "Markdown" }
     );
@@ -192,17 +253,19 @@ export async function onboardingConversation(
     });
 
     while (true) {
-      const weightCtx = await conversation.wait();
-      const text = weightCtx.message?.text;
+      const pendingText = takePendingText(ctx);
+      const weightCtx = pendingText ? null : await conversation.wait();
+      const text = pendingText ?? weightCtx?.message?.text;
+      const replyCtx = weightCtx ?? ctx;
 
       if (!text) {
-        await weightCtx.reply("Пожалуйста, введите число.");
+        await replyCtx.reply("Пожалуйста, введите число.");
         continue;
       }
 
       const parsed = parseFloat(text.replace(",", "."));
       if (isNaN(parsed) || parsed < 30 || parsed > 300) {
-        await weightCtx.reply("Введите корректный вес (30-300 кг).");
+        await replyCtx.reply("Введите корректный вес (30-300 кг).");
         continue;
       }
 
@@ -229,17 +292,19 @@ export async function onboardingConversation(
     });
 
     while (true) {
-      const waistCtx = await conversation.wait();
-      const text = waistCtx.message?.text;
+      const pendingText = takePendingText(ctx);
+      const waistCtx = pendingText ? null : await conversation.wait();
+      const text = pendingText ?? waistCtx?.message?.text;
+      const replyCtx = waistCtx ?? ctx;
 
       if (!text) {
-        await waistCtx.reply("Пожалуйста, введите число.");
+        await replyCtx.reply("Пожалуйста, введите число.");
         continue;
       }
 
       const parsed = parseFloat(text.replace(",", "."));
       if (isNaN(parsed) || parsed < 40 || parsed > 200) {
-        await waistCtx.reply("Введите корректный обхват (40-200 см).");
+        await replyCtx.reply("Введите корректный обхват (40-200 см).");
         continue;
       }
 
@@ -266,17 +331,19 @@ export async function onboardingConversation(
     });
 
     while (true) {
-      const heightCtx = await conversation.wait();
-      const text = heightCtx.message?.text;
+      const pendingText = takePendingText(ctx);
+      const heightCtx = pendingText ? null : await conversation.wait();
+      const text = pendingText ?? heightCtx?.message?.text;
+      const replyCtx = heightCtx ?? ctx;
 
       if (!text) {
-        await heightCtx.reply("Пожалуйста, введите число.");
+        await replyCtx.reply("Пожалуйста, введите число.");
         continue;
       }
 
       const parsed = parseFloat(text.replace(",", "."));
       if (isNaN(parsed) || parsed < 100 || parsed > 250) {
-        await heightCtx.reply("Введите корректный рост (100-250 см).");
+        await replyCtx.reply("Введите корректный рост (100-250 см).");
         continue;
       }
 
@@ -451,12 +518,17 @@ export async function onboardingConversation(
 
     while (!goalAccepted) {
       // Calculate recommended goals
+      const durationMonthsForPlans = Math.max(
+        0.25,
+        durationToMonths(challenge.durationMonths, config.challengeDurationUnit)
+      );
+
       const recommendedGoals = metricsService.calculateRecommendedGoals({
         track,
         currentWeight,
         currentWaist,
         height,
-        durationMonths: challenge.durationMonths,
+        durationMonths: durationMonthsForPlans,
       });
       console.log(`[Onboarding] User ${userId} calculated recommended goals:`, recommendedGoals);
 
@@ -483,51 +555,56 @@ export async function onboardingConversation(
 
       while (true) {
         console.log(`[Onboarding] User ${userId} waiting for weight input...`);
-        const targetCtx = await conversation.wait();
-        console.log(`[Onboarding] User ${userId} received weight input:`, targetCtx.message?.text || targetCtx.callbackQuery?.data);
+        const pendingText = takePendingText(ctx);
+        const targetCtx = pendingText ? null : await conversation.wait();
+        const callbackData = targetCtx?.callbackQuery?.data;
+        const text = pendingText ?? targetCtx?.message?.text;
+        const replyCtx = targetCtx ?? ctx;
+        console.log(
+          `[Onboarding] User ${userId} received weight input:`,
+          text || callbackData
+        );
 
-        if (targetCtx.callbackQuery?.data?.startsWith("use_weight_")) {
+        if (callbackData?.startsWith("use_weight_")) {
           console.log(`[Onboarding] User ${userId} callback query for weight button detected`);
-          targetWeight = parseFloat(targetCtx.callbackQuery.data.replace("use_weight_", ""));
+          targetWeight = parseFloat(callbackData.replace("use_weight_", ""));
           console.log(`[Onboarding] User ${userId} answering callback query...`);
-          await targetCtx.answerCallbackQuery();
+          await targetCtx!.answerCallbackQuery();
           console.log(`[Onboarding] User ${userId} callback answered, editing message...`);
-          await targetCtx.editMessageText(`✅ Целевой вес: ${targetWeight} кг`);
+          await targetCtx!.editMessageText(`✅ Целевой вес: ${targetWeight} кг`);
           console.log(`[Onboarding] User ${userId} message edited, breaking from weight loop`);
           break;
         }
 
-        const text = targetCtx.message?.text;
-
         if (!text) {
           console.log(`[Onboarding] User ${userId} no text in message, asking again...`);
-          await targetCtx.reply("Пожалуйста, введите число или нажмите кнопку.");
+          await replyCtx.reply("Пожалуйста, введите число или нажмите кнопку.");
           continue;
         }
 
         const parsed = parseFloat(text.replace(",", "."));
         if (isNaN(parsed) || parsed < 30 || parsed > 300) {
           console.log(`[Onboarding] User ${userId} invalid weight: ${parsed}`);
-          await targetCtx.reply("Введите корректный вес (30-300 кг).");
+          await replyCtx.reply("Введите корректный вес (30-300 кг).");
           continue;
         }
 
         if (track === "cut" && parsed >= currentWeight) {
           console.log(`[Onboarding] User ${userId} weight too high for cut: ${parsed} >= ${currentWeight}`);
-          await targetCtx.reply("Для Cut целевой вес должен быть меньше текущего.");
+          await replyCtx.reply("Для Cut целевой вес должен быть меньше текущего.");
           continue;
         }
 
         if (track === "bulk" && parsed <= currentWeight) {
           console.log(`[Onboarding] User ${userId} weight too low for bulk: ${parsed} <= ${currentWeight}`);
-          await targetCtx.reply("Для Bulk целевой вес должен быть больше текущего.");
+          await replyCtx.reply("Для Bulk целевой вес должен быть больше текущего.");
           continue;
         }
 
         targetWeight = parsed;
         console.log(`[Onboarding] User ${userId} valid weight accepted: ${targetWeight}`);
         console.log(`[Onboarding] User ${userId} sending weight confirmation message...`);
-        await targetCtx.reply(`✅ Целевой вес: ${targetWeight} кг`);
+        await replyCtx.reply(`✅ Целевой вес: ${targetWeight} кг`);
         console.log(`[Onboarding] User ${userId} weight confirmation sent, breaking from loop`);
         break;
       }
@@ -558,45 +635,50 @@ export async function onboardingConversation(
 
       while (true) {
         console.log(`[Onboarding] User ${userId} waiting for waist input...`);
-        const targetCtx = await conversation.wait();
-        console.log(`[Onboarding] User ${userId} received waist input:`, targetCtx.message?.text || targetCtx.callbackQuery?.data);
+        const pendingText = takePendingText(ctx);
+        const targetCtx = pendingText ? null : await conversation.wait();
+        const callbackData = targetCtx?.callbackQuery?.data;
+        const text = pendingText ?? targetCtx?.message?.text;
+        const replyCtx = targetCtx ?? ctx;
+        console.log(
+          `[Onboarding] User ${userId} received waist input:`,
+          text || callbackData
+        );
 
-        if (targetCtx.callbackQuery?.data?.startsWith("use_waist_")) {
+        if (callbackData?.startsWith("use_waist_")) {
           console.log(`[Onboarding] User ${userId} callback query for waist button detected`);
-          targetWaist = parseFloat(targetCtx.callbackQuery.data.replace("use_waist_", ""));
+          targetWaist = parseFloat(callbackData.replace("use_waist_", ""));
           console.log(`[Onboarding] User ${userId} answering waist callback query...`);
-          await targetCtx.answerCallbackQuery();
+          await targetCtx!.answerCallbackQuery();
           console.log(`[Onboarding] User ${userId} waist callback answered, editing message...`);
-          await targetCtx.editMessageText(`✅ Целевой обхват талии: ${targetWaist} см`);
+          await targetCtx!.editMessageText(`✅ Целевой обхват талии: ${targetWaist} см`);
           console.log(`[Onboarding] User ${userId} waist message edited, breaking from waist loop`);
           break;
         }
 
-        const text = targetCtx.message?.text;
-
         if (!text) {
           console.log(`[Onboarding] User ${userId} no text in waist message, asking again...`);
-          await targetCtx.reply("Пожалуйста, введите число или нажмите кнопку.");
+          await replyCtx.reply("Пожалуйста, введите число или нажмите кнопку.");
           continue;
         }
 
         const parsed = parseFloat(text.replace(",", "."));
         if (isNaN(parsed) || parsed < 40 || parsed > 200) {
           console.log(`[Onboarding] User ${userId} invalid waist: ${parsed}`);
-          await targetCtx.reply("Введите корректный обхват (40-200 см).");
+          await replyCtx.reply("Введите корректный обхват (40-200 см).");
           continue;
         }
 
         if (track === "cut" && parsed >= currentWaist) {
           console.log(`[Onboarding] User ${userId} waist too high for cut: ${parsed} >= ${currentWaist}`);
-          await targetCtx.reply("Для Cut целевой обхват должен быть меньше текущего.");
+          await replyCtx.reply("Для Cut целевой обхват должен быть меньше текущего.");
           continue;
         }
 
         targetWaist = parsed;
         console.log(`[Onboarding] User ${userId} valid waist accepted: ${targetWaist}`);
         console.log(`[Onboarding] User ${userId} sending waist confirmation message...`);
-        await targetCtx.reply(`✅ Целевой обхват талии: ${targetWaist} см`);
+        await replyCtx.reply(`✅ Целевой обхват талии: ${targetWaist} см`);
         console.log(`[Onboarding] User ${userId} waist confirmation sent, breaking from loop`);
         break;
       }
@@ -615,7 +697,7 @@ export async function onboardingConversation(
             height,
             targetWeight,
             targetWaist,
-            durationMonths: challenge.durationMonths,
+            durationMonths: durationMonthsForPlans,
           })
         );
 
@@ -763,11 +845,13 @@ export async function onboardingConversation(
 
       let selectedCommitments: number[] = [];
       while (true) {
-        const commitCtx = await conversation.wait();
-        const text = commitCtx.message?.text;
+        const pendingText = takePendingText(ctx);
+        const commitCtx = pendingText ? null : await conversation.wait();
+        const text = pendingText ?? commitCtx?.message?.text;
+        const replyCtx = commitCtx ?? ctx;
 
         if (!text) {
-          await commitCtx.reply("Пожалуйста, введите номера обязательств.");
+          await replyCtx.reply("Пожалуйста, введите номера обязательств.");
           continue;
         }
 
@@ -777,7 +861,7 @@ export async function onboardingConversation(
           .filter((n) => !isNaN(n) && n >= 1 && n <= templates.length);
 
         if (numbers.length < 2 || numbers.length > 3) {
-          await commitCtx.reply("Выберите от 2 до 3 обязательств.");
+          await replyCtx.reply("Выберите от 2 до 3 обязательств.");
           continue;
         }
 

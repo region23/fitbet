@@ -5,13 +5,21 @@ import { runOpenCheckinJob } from "./jobs/open-checkin";
 import { runReminderJob } from "./jobs/reminder";
 import { runCloseCheckinJob } from "./jobs/close-checkin";
 import { runFinaleJob } from "./jobs/finale";
+import { runBankHolderElectionTimeoutJob } from "./jobs/bankholder-election";
+import { runOnboardingTimeoutJob } from "./jobs/onboarding-timeout";
+import { config } from "../config";
 
 let cronJob: CronJob | null = null;
 
 export function startScheduler(bot: Bot<BotContext>) {
-  // Run all jobs every hour
+  const cronSpec =
+    config.checkinPeriodMinutes > 0 && config.checkinPeriodMinutes < 60
+      ? "* * * * *"
+      : "0 * * * *";
+
+  // Run jobs on schedule (minute-level when testing short periods)
   cronJob = new CronJob(
-    "0 * * * *", // Every hour at minute 0
+    cronSpec, // Every minute if needed, otherwise hourly
     async () => {
       console.log(`[${new Date().toISOString()}] Running scheduled jobs...`);
 
@@ -21,6 +29,8 @@ export function startScheduler(bot: Bot<BotContext>) {
         await runReminderJob(bot);
         await runCloseCheckinJob(bot);
         await runFinaleJob(bot);
+        await runBankHolderElectionTimeoutJob(bot);
+        await runOnboardingTimeoutJob(bot);
 
         console.log(`[${new Date().toISOString()}] Scheduled jobs completed`);
       } catch (error) {
@@ -42,6 +52,8 @@ export function startScheduler(bot: Bot<BotContext>) {
       await runReminderJob(bot);
       await runCloseCheckinJob(bot);
       await runFinaleJob(bot);
+      await runBankHolderElectionTimeoutJob(bot);
+      await runOnboardingTimeoutJob(bot);
     } catch (error) {
       console.error("Error in startup job check:", error);
     }

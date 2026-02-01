@@ -2,6 +2,7 @@ import { eq, and, lte, gte } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { NewCheckin, NewCheckinWindow, CheckinWindowStatus } from "../db/schema";
 import { config } from "../config";
+import { addDuration } from "../utils/duration";
 
 export const checkinService = {
   // Check-in Window operations
@@ -98,23 +99,40 @@ export const checkinService = {
     startDate: Date,
     durationMonths: number
   ) {
-    const totalWindows = durationMonths * 2; // Every 2 weeks
+    const periodMs =
+      config.checkinPeriodMinutes > 0
+        ? config.checkinPeriodMinutes * 60 * 1000
+        : (config.checkinPeriodDays > 0 ? config.checkinPeriodDays : 14) *
+          24 *
+          60 *
+          60 *
+          1000;
+
+    if (periodMs <= 0) {
+      throw new Error("Invalid check-in period configuration");
+    }
+
     const windows: NewCheckinWindow[] = [];
 
-    for (let i = 1; i <= totalWindows; i++) {
-      const opensAt = new Date(startDate);
-      opensAt.setDate(opensAt.getDate() + i * 14); // Every 14 days
+    const endDate = addDuration(startDate, durationMonths, config.challengeDurationUnit);
 
+    let windowNumber = 1;
+    let opensAt = new Date(startDate.getTime() + periodMs);
+
+    while (opensAt <= endDate) {
       const closesAt = new Date(opensAt);
       closesAt.setHours(closesAt.getHours() + config.checkinWindowHours);
 
       windows.push({
         challengeId,
-        windowNumber: i,
+        windowNumber,
         opensAt,
         closesAt,
         status: "scheduled",
       });
+
+      windowNumber += 1;
+      opensAt = new Date(opensAt.getTime() + periodMs);
     }
 
     await db.insert(schema.checkinWindows).values(windows);
@@ -123,8 +141,12 @@ export const checkinService = {
 
   // Check-in operations
   async createCheckin(data: NewCheckin) {
-    const [checkin] = await db.insert(schema.checkins).values(data).returning();
-    return checkin;
+    const [checkin] = await db
+      .insert(schema.checkins)
+      .values(data)
+      .onConflictDoNothing()
+      .returning();
+    return checkin || null;
   },
 
   async findCheckinByParticipantAndWindow(participantId: number, windowId: number) {

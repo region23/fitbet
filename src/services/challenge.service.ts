@@ -1,6 +1,8 @@
 import { eq, and, notInArray } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { NewChallenge, ChallengeStatus } from "../db/schema";
+import { addDuration } from "../utils/duration";
+import { config } from "../config";
 
 export const challengeService = {
   async create(data: NewChallenge) {
@@ -77,8 +79,7 @@ export const challengeService = {
     const challenge = await this.findById(id);
     if (!challenge) return null;
 
-    const endsAt = new Date(now);
-    endsAt.setMonth(endsAt.getMonth() + challenge.durationMonths);
+    const endsAt = addDuration(now, challenge.durationMonths, config.challengeDurationUnit);
 
     const [updated] = await db
       .update(schema.challenges)

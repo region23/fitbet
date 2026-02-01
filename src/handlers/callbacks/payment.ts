@@ -5,6 +5,8 @@ import {
   paymentService,
 } from "../../services";
 import { InlineKeyboard } from "grammy";
+import { config } from "../../config";
+import { formatDuration } from "../../utils/duration";
 
 export async function handlePaidCallback(ctx: BotContext) {
   const callbackData = ctx.callbackQuery?.data;
@@ -36,7 +38,16 @@ export async function handlePaidCallback(ctx: BotContext) {
   }
 
   // Mark payment as paid
-  await paymentService.markPaid(participantId);
+  await paymentService.getOrCreate(participantId);
+  const markedPayment = await paymentService.markPaid(participantId);
+  if (!markedPayment) {
+    await ctx.answerCallbackQuery({
+      text: "Не удалось отметить оплату. Попробуйте позже.",
+      show_alert: true,
+    });
+    return;
+  }
+
   await participantService.updateStatus(participantId, "payment_marked");
 
   await ctx.answerCallbackQuery({ text: "Оплата отмечена!" });
@@ -53,7 +64,16 @@ export async function handlePaidCallback(ctx: BotContext) {
   // Check if user is Bank Holder - auto-confirm
   if (challenge.bankHolderId === userId) {
     // Auto-confirm payment for Bank Holder
-    await paymentService.confirm(participantId, userId);
+    const confirmedPayment = await paymentService.confirm(participantId, userId);
+    if (!confirmedPayment) {
+      await ctx.editMessageText(
+        `✅ *Оплата отмечена*\n\n` +
+          `Не удалось подтвердить оплату автоматически. Попробуйте позже.`,
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
     await participantService.updateStatus(participantId, "active");
 
     await ctx.editMessageText(
@@ -89,9 +109,12 @@ export async function handlePaidCallback(ctx: BotContext) {
         challenge.chatId,
         `🎉 *Челлендж начался!*\n\n` +
           `Все оплаты подтверждены. Челлендж официально стартовал!\n\n` +
-          `📅 Длительность: ${activated.durationMonths} месяцев\n` +
+          `📅 Длительность: ${formatDuration(
+            activated.durationMonths,
+            config.challengeDurationUnit
+          )}\n` +
           `🏁 Окончание: ${activated.endsAt?.toLocaleDateString("ru-RU")}\n\n` +
-          `Первое окно чек-ина откроется через 2 недели. Удачи! 💪`,
+          `Первое окно чек-ина откроется по расписанию. Удачи! 💪`,
         { parse_mode: "Markdown" }
       );
     }
@@ -103,6 +126,28 @@ export async function handlePaidCallback(ctx: BotContext) {
         `Мы уведомим вас, когда челлендж начнётся.`,
       { parse_mode: "Markdown" }
     );
+
+    if (challenge.bankHolderId) {
+      const confirmKeyboard = new InlineKeyboard().text(
+        "✅ Подтвердить оплату",
+        `confirm_${participant.id}`
+      );
+
+      try {
+        await ctx.api.sendMessage(
+          challenge.bankHolderId,
+          `💳 *Ожидает подтверждения:*\n\n` +
+            `Участник: ${name}\n` +
+            `Сумма: ${challenge.stakeAmount}₽`,
+          {
+            reply_markup: confirmKeyboard,
+            parse_mode: "Markdown",
+          }
+        );
+      } catch (e) {
+        // User may have blocked the bot
+      }
+    }
 
     // Notify the group chat
     await ctx.api.sendMessage(
@@ -309,9 +354,12 @@ export async function handleConfirmPaymentCallback(ctx: BotContext) {
       challenge.chatId,
       `🎉 *Челлендж начался!*\n\n` +
         `Все оплаты подтверждены. Челлендж официально стартовал!\n\n` +
-        `📅 Длительность: ${activated.durationMonths} месяцев\n` +
+        `📅 Длительность: ${formatDuration(
+          activated.durationMonths,
+          config.challengeDurationUnit
+        )}\n` +
         `🏁 Окончание: ${activated.endsAt?.toLocaleDateString("ru-RU")}\n\n` +
-        `Первое окно чек-ина откроется через 2 недели. Удачи! 💪`,
+        `Первое окно чек-ина откроется по расписанию. Удачи! 💪`,
       { parse_mode: "Markdown" }
     );
   }

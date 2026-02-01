@@ -5,6 +5,7 @@ import { createCommand } from "./create";
 import { bankholderCommand } from "./bankholder";
 import { statusCommand } from "./status";
 import { helpCommand } from "./help";
+import { clearDbCommand } from "./clear-db";
 
 export function setupCommandHandlers(bot: Bot<BotContext>) {
   bot.command("start", startCommand);
@@ -12,4 +13,5 @@ export function setupCommandHandlers(bot: Bot<BotContext>) {
   bot.command("bankholder", bankholderCommand);
   bot.command("status", statusCommand);
   bot.command("help", helpCommand);
+  bot.command("clear_db", clearDbCommand);
 }

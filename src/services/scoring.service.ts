@@ -1,6 +1,7 @@
 import { participantService } from "./participant.service";
 import { goalService } from "./goal.service";
 import { checkinService } from "./checkin.service";
+import { paymentService } from "./payment.service";
 import type { Participant, Goal, Challenge } from "../db/schema";
 
 interface ParticipantScore {
@@ -15,7 +16,17 @@ interface ParticipantScore {
 
 export const scoringService = {
   async calculateScores(challenge: Challenge): Promise<ParticipantScore[]> {
-    const participants = await participantService.findActiveByChallenge(challenge.id);
+    const allParticipants = await participantService.findByChallengeId(challenge.id);
+    const confirmedPayments = await paymentService.getConfirmedParticipantIdsByChallenge(
+      challenge.id
+    );
+    const participants = allParticipants.filter((p) => {
+      if (p.status === "active" || p.status === "completed") return true;
+      if ((p.status === "disqualified" || p.status === "dropped") && confirmedPayments.has(p.id)) {
+        return true;
+      }
+      return false;
+    });
     const scores: ParticipantScore[] = [];
 
     for (const participant of participants) {
@@ -48,12 +59,13 @@ export const scoringService = {
     const disciplineThreshold = challenge.disciplineThreshold * 100;
 
     const winners = scores.filter(
-      (s) => s.disciplineScore >= disciplineThreshold && s.goalAchievement >= 80
+      (s) =>
+        (s.participant.status === "active" || s.participant.status === "completed") &&
+        s.disciplineScore >= disciplineThreshold &&
+        s.goalAchievement >= 100
     );
 
-    const losers = scores.filter(
-      (s) => !(s.disciplineScore >= disciplineThreshold && s.goalAchievement >= 80)
-    );
+    const losers = scores.filter((s) => !winners.includes(s));
 
     // Calculate prize pool and distribution
     if (winners.length > 0 && losers.length > 0) {

@@ -10,7 +10,7 @@ export const challenges = sqliteTable("challenges", {
   creatorId: integer("creator_id").notNull(),
 
   // Challenge settings
-  durationMonths: integer("duration_months").notNull().default(6), // 6 or 12 months
+  durationMonths: integer("duration_months").notNull().default(6), // duration in configured units
   stakeAmount: real("stake_amount").notNull(), // in rubles
   disciplineThreshold: real("discipline_threshold").notNull().default(0.8), // 80% default
   maxSkips: integer("max_skips").notNull().default(2),

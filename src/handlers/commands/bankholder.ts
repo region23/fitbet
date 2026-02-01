@@ -76,5 +76,5 @@ export async function bankholderCommand(ctx: BotContext) {
   }
 
   // Start the voting conversation
-  await ctx.conversation.enter("bankHolderVotingConversation");
+  await ctx.conversation.reenter("bankHolderVotingConversation");
 }

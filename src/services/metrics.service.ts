@@ -22,65 +22,76 @@ export const metricsService = {
   }): RecommendedGoals {
     const { track, currentWeight, currentWaist, height, durationMonths } = params;
     const heightM = height / 100;
+    const round1 = (value: number) => Math.round(value * 10) / 10;
 
     // Ideal weight based on BMI = 22 (middle of healthy range 18.5-24.9)
-    const idealWeight = Math.round(22 * heightM * heightM);
+    const idealWeight = round1(22 * heightM * heightM);
 
     // Ideal waist based on WHtR = 0.45 (healthy < 0.5)
-    const idealWaist = Math.round(height * 0.45);
+    const idealWaist = round1(height * 0.45);
 
     let targetWeight: number;
     let targetWaist: number;
     let weightReason: string;
     let waistReason: string;
+    const safeWeeks = Math.max(1, durationMonths * 4);
+    const safeMonths = Math.max(0.25, durationMonths);
 
     if (track === "cut") {
       // For Cut: target is minimum of (current - 10%) or (ideal + 5%)
-      const weightLoss10Percent = Math.round(currentWeight * 0.9);
-      const idealPlus5Percent = Math.round(idealWeight * 1.05);
+      const weightLoss10Percent = round1(currentWeight * 0.9);
+      const idealPlus5Percent = round1(idealWeight * 1.05);
 
       // Safe weekly loss: 0.5-1 kg/week
-      const maxSafeLoss = durationMonths * 4 * 0.75; // ~0.75 kg/week average
-      const safestTarget = Math.round(currentWeight - maxSafeLoss);
+      const maxSafeLoss = safeWeeks * 0.75; // ~0.75 kg/week average
+      const safestTarget = round1(currentWeight - maxSafeLoss);
 
       // Choose the most conservative target
       targetWeight = Math.max(safestTarget, Math.min(weightLoss10Percent, idealPlus5Percent));
+      if (targetWeight >= currentWeight) {
+        targetWeight = round1(currentWeight - 0.1);
+      }
 
       // Calculate weekly rate for explanation
-      const weeklyLoss = (currentWeight - targetWeight) / (durationMonths * 4);
+      const weeklyLoss = (currentWeight - targetWeight) / safeWeeks;
       weightReason = `здоровый BMI ~22 для роста ${height} см, потеря ~${weeklyLoss.toFixed(1)} кг/неделю`;
 
       // Waist: 1.5 cm/month reduction (middle of 1-2 cm/month safe range)
       const waistReductionPerMonth = 1.5;
-      const targetWaistReduction = waistReductionPerMonth * durationMonths;
-      targetWaist = Math.round(
-        Math.max(currentWaist - targetWaistReduction, idealWaist)
-      );
+      const targetWaistReduction = waistReductionPerMonth * safeMonths;
+      targetWaist = round1(Math.max(currentWaist - targetWaistReduction, idealWaist));
+      if (targetWaist >= currentWaist) {
+        targetWaist = round1(currentWaist - 0.1);
+      }
 
-      const monthlyWaistLoss = (currentWaist - targetWaist) / durationMonths;
+      const monthlyWaistLoss = (currentWaist - targetWaist) / safeMonths;
       waistReason = `оптимальное соотношение талия/рост 0.45, потеря ~${monthlyWaistLoss.toFixed(1)} см/месяц`;
     } else {
       // For Bulk: target is ideal + 5-10%
-      targetWeight = Math.round(idealWeight * 1.07);
+      targetWeight = round1(idealWeight * 1.07);
 
       // Safe weekly gain: 0.25-0.5 kg/week
-      const maxSafeGain = durationMonths * 4 * 0.35; // ~0.35 kg/week average
-      const safestTarget = Math.round(currentWeight + maxSafeGain);
+      const maxSafeGain = safeWeeks * 0.35; // ~0.35 kg/week average
+      const safestTarget = round1(currentWeight + maxSafeGain);
 
       // Choose the more conservative target
       targetWeight = Math.min(targetWeight, safestTarget);
+      if (targetWeight <= currentWeight) {
+        targetWeight = round1(currentWeight + 0.1);
+      }
 
-      const weeklyGain = (targetWeight - currentWeight) / (durationMonths * 4);
+      const weeklyGain = (targetWeight - currentWeight) / safeWeeks;
       weightReason = `набор мышечной массы ~${weeklyGain.toFixed(2)} кг/неделю`;
 
       // Waist: 0.3 cm/month gain (muscle gain in core)
       const waistGainPerMonth = 0.3;
-      const targetWaistGain = waistGainPerMonth * durationMonths;
-      targetWaist = Math.round(
-        Math.min(currentWaist + targetWaistGain, currentWaist + 5)
-      );
+      const targetWaistGain = waistGainPerMonth * safeMonths;
+      targetWaist = round1(Math.min(currentWaist + targetWaistGain, currentWaist + 5));
+      if (targetWaist <= currentWaist) {
+        targetWaist = round1(currentWaist + 0.1);
+      }
 
-      const monthlyWaistGain = (targetWaist - currentWaist) / durationMonths;
+      const monthlyWaistGain = (targetWaist - currentWaist) / safeMonths;
       waistReason = `небольшое увеличение за счёт мышц кора ~${monthlyWaistGain.toFixed(1)} см/месяц`;
     }
 

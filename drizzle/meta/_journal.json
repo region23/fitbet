@@ -22,6 +22,20 @@
       "when": 1738186800000,
       "tag": "0002_add_bankholder_voting",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1769975744753,
+      "tag": "0004_pending_checkin_and_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1769976866372,
+      "tag": "0005_add_pending_checkin_requested_at",
+      "breakpoints": true
     }
   ]
 }

@@ -60,7 +60,7 @@ export async function handleCheckinCallback(ctx: BotContext) {
   await ctx.answerCallbackQuery({ text: "Начинаем чек-ин..." });
 
   // Set session data for the conversation
-  ctx.session.checkin = { windowId };
+  await participantService.setPendingCheckin(participant.id, windowId);
 
   // Try to send message to private chat and start conversation
   try {

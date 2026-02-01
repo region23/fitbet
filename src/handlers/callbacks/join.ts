@@ -1,6 +1,13 @@
 import type { BotContext } from "../../types";
-import { challengeService, participantService } from "../../services";
+import {
+  challengeService,
+  participantService,
+  goalService,
+  commitmentService,
+} from "../../services";
 import { InlineKeyboard } from "grammy";
+import { config } from "../../config";
+import { formatDuration } from "../../utils/duration";
 
 export async function handleJoinCallback(ctx: BotContext) {
   const callbackData = ctx.callbackQuery?.data;
@@ -56,6 +63,43 @@ export async function handleJoinCallback(ctx: BotContext) {
       return;
     }
 
+    if (
+      existing.status === "dropped" &&
+      (challenge.status === "draft" || challenge.status === "pending_payments")
+    ) {
+      await participantService.restartOnboarding(existing.id);
+      await goalService.deleteByParticipantId(existing.id);
+      await commitmentService.deleteParticipantCommitments(existing.id);
+
+      await ctx.answerCallbackQuery({
+        text: "Онбординг начат заново. Проверьте личные сообщения.",
+        show_alert: true,
+      });
+
+      try {
+        await ctx.api.sendMessage(
+          userId,
+          `🎯 *Вы снова присоединились к челленджу!*\n\n` +
+            `Чат: ${challenge.chatTitle}\n` +
+            `Длительность: ${formatDuration(
+              challenge.durationMonths,
+              config.challengeDurationUnit
+            )}\n` +
+            `Ставка: ${challenge.stakeAmount}₽\n\n` +
+            `⏳ На завершение онбординга есть 48 часов.\n\n` +
+            `Напишите /start чтобы начать онбординг.`,
+          { parse_mode: "Markdown" }
+        );
+      } catch (e) {
+        await ctx.reply(
+          `@${username || firstName}, пожалуйста, напишите боту @${ctx.me.username} в личку, ` +
+            `чтобы начать онбординг.`
+        );
+      }
+
+      return;
+    }
+
     await ctx.answerCallbackQuery({
       text: "Вы уже участвуете в этом челлендже",
       show_alert: true,
@@ -93,8 +137,12 @@ export async function handleJoinCallback(ctx: BotContext) {
       userId,
       `🎯 *Вы присоединились к челленджу!*\n\n` +
         `Чат: ${challenge.chatTitle}\n` +
-        `Длительность: ${challenge.durationMonths} месяцев\n` +
+        `Длительность: ${formatDuration(
+          challenge.durationMonths,
+          config.challengeDurationUnit
+        )}\n` +
         `Ставка: ${challenge.stakeAmount}₽\n\n` +
+        `⏳ На завершение онбординга есть 48 часов.\n\n` +
         `Напишите /start чтобы начать онбординг.`,
       { parse_mode: "Markdown" }
     );

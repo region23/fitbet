@@ -8,6 +8,7 @@ import {
 } from "./payment";
 import { handleVoteCallback } from "./bankholder-vote";
 import { handleCheckinCallback } from "./checkin";
+import { handleClearDbCallback } from "./clear-db";
 
 export function setupCallbackHandlers(bot: Bot<BotContext>) {
   // Join challenge
@@ -23,4 +24,7 @@ export function setupCallbackHandlers(bot: Bot<BotContext>) {
 
   // Check-in
   bot.callbackQuery(/^checkin_\d+$/, handleCheckinCallback);
+
+  // Admin clear DB
+  bot.callbackQuery(/^clear_db_(yes|no)$/, handleClearDbCallback);
 }

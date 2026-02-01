@@ -40,6 +40,17 @@ bun run db:push      # Push schema changes to DB
 bun run db:studio    # Open Drizzle Studio
 ```
 
+## Environment Variables (Testing & Ops)
+
+- `ADMIN_TELEGRAM_ID` — Telegram user ID that can run `/clear_db` in private chat.
+  - `/clear_db` полностью очищает БД и пересоздаёт шаблоны commitments (для тестов).
+- `CHECKIN_PERIOD_DAYS` — период между чек-инами в днях (по умолчанию 14).
+- `CHECKIN_PERIOD_MINUTES` — период между чек-инами в минутах. Если > 0, имеет приоритет над `CHECKIN_PERIOD_DAYS`.
+  - При `CHECKIN_PERIOD_MINUTES < 60` scheduler запускается каждую минуту для тестов.
+- `CHALLENGE_DURATION_UNIT` — единица длительности челленджа: `months` (default), `days`, `minutes`.
+  - Значение `durationMonths` в БД трактуется как количество этих единиц.
+  - Для LLM/метрик длительность конвертируется в месяцы (дни/30, минуты/43200).
+
 ## Architecture
 
 ### Core Entities

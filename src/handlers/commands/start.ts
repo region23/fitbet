@@ -1,5 +1,6 @@
 import type { BotContext } from "../../types";
-import { participantService } from "../../services";
+import { participantService, checkinService } from "../../services";
+import { config } from "../../config";
 
 export async function startCommand(ctx: BotContext) {
   console.log(`[StartCommand] Called for user ${ctx.from?.id}, message:`, ctx.message?.text || ctx.callbackQuery?.data);
@@ -10,15 +11,60 @@ export async function startCommand(ctx: BotContext) {
     // Check if user has a pending check-in session
     if (ctx.session.checkin?.windowId) {
       console.log(`[StartCommand] User ${userId} has pending checkin, entering checkinConversation`);
-      await ctx.conversation.enter("checkinConversation");
+      await ctx.conversation.enter("checkinConversation", { overwrite: true });
       return;
+    }
+
+    // Check if there is a pending check-in request from a group chat
+    const pendingCheckins = await participantService.findPendingCheckinsByUserId(userId);
+    if (pendingCheckins.length > 0) {
+      let hadPending = false;
+
+      for (const participant of pendingCheckins) {
+        hadPending = true;
+
+        if (participant.status !== "active" || !participant.pendingCheckinWindowId) {
+          await participantService.clearPendingCheckin(participant.id);
+          continue;
+        }
+
+        const window = await checkinService.findWindowById(
+          participant.pendingCheckinWindowId
+        );
+
+        if (!window || window.status !== "open") {
+          await participantService.clearPendingCheckin(participant.id);
+          continue;
+        }
+
+        const existing = await checkinService.findCheckinByParticipantAndWindow(
+          participant.id,
+          window.id
+        );
+
+        if (existing) {
+          await participantService.clearPendingCheckin(participant.id);
+          continue;
+        }
+
+        ctx.session.checkin = { windowId: window.id };
+        await ctx.conversation.enter("checkinConversation", { overwrite: true });
+        return;
+      }
+
+      if (hadPending) {
+        await ctx.reply(
+          "Окно чек-ина уже закрыто или чек-ин уже сдан. " +
+            "Если окно ещё открыто, нажмите кнопку «Сдать чек-ин» в групповой чат."
+        );
+      }
     }
 
     // Check if user is in onboarding
     const onboardingParticipant = await participantService.getOnboardingParticipant(userId);
     if (onboardingParticipant) {
       console.log(`[StartCommand] User ${userId} has onboarding participant, entering onboardingConversation`);
-      await ctx.conversation.enter("onboardingConversation");
+      await ctx.conversation.enter("onboardingConversation", { overwrite: true });
       return;
     }
 
@@ -48,6 +94,11 @@ export async function startCommand(ctx: BotContext) {
       }
     }
 
+    const checkinPeriodText =
+      config.checkinPeriodMinutes > 0
+        ? `${config.checkinPeriodMinutes} минут`
+        : `${config.checkinPeriodDays} дней`;
+
     // Default welcome message
     await ctx.reply(
       `👋 *Добро пожаловать в FitBet!*\n\n` +
@@ -55,7 +106,7 @@ export async function startCommand(ctx: BotContext) {
         `*Как это работает:*\n` +
         `1. Создайте челлендж в групповом чате командой /create\n` +
         `2. Участники присоединяются и проходят онбординг\n` +
-        `3. Каждые 2 недели сдаёте чек-ины (вес, талия, фото)\n` +
+        `3. Каждые ${checkinPeriodText} сдаёте чек-ины (вес, талия, фото)\n` +
         `4. В конце — автоматический расчёт победителей\n\n` +
         `*Команды:*\n` +
         `/create — создать челлендж (в групповом чате)\n` +

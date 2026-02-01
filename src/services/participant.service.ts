@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt, isNotNull, desc } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { NewParticipant, ParticipantStatus, Track } from "../db/schema";
 
@@ -91,6 +91,32 @@ export const participantService = {
     return updated;
   },
 
+  async restartOnboarding(id: number) {
+    const [updated] = await db
+      .update(schema.participants)
+      .set({
+        track: null,
+        startWeight: null,
+        startWaist: null,
+        height: null,
+        startPhotoFrontId: null,
+        startPhotoLeftId: null,
+        startPhotoRightId: null,
+        startPhotoBackId: null,
+        totalCheckins: 0,
+        completedCheckins: 0,
+        skippedCheckins: 0,
+        pendingCheckinWindowId: null,
+        pendingCheckinRequestedAt: null,
+        status: "onboarding",
+        joinedAt: new Date(),
+        onboardingCompletedAt: null,
+      })
+      .where(eq(schema.participants.id, id))
+      .returning();
+    return updated;
+  },
+
   async completeOnboarding(id: number) {
     const [updated] = await db
       .update(schema.participants)
@@ -101,6 +127,55 @@ export const participantService = {
       .where(eq(schema.participants.id, id))
       .returning();
     return updated;
+  },
+
+  async setPendingCheckin(id: number, windowId: number) {
+    const [updated] = await db
+      .update(schema.participants)
+      .set({
+        pendingCheckinWindowId: windowId,
+        pendingCheckinRequestedAt: new Date(),
+      })
+      .where(eq(schema.participants.id, id))
+      .returning();
+    return updated;
+  },
+
+  async clearPendingCheckin(id: number) {
+    const [updated] = await db
+      .update(schema.participants)
+      .set({
+        pendingCheckinWindowId: null,
+        pendingCheckinRequestedAt: null,
+      })
+      .where(eq(schema.participants.id, id))
+      .returning();
+    return updated;
+  },
+
+  async findPendingCheckinsByUserId(userId: number) {
+    return db
+      .select()
+      .from(schema.participants)
+      .where(
+        and(
+          eq(schema.participants.userId, userId),
+          isNotNull(schema.participants.pendingCheckinWindowId)
+        )
+      )
+      .orderBy(desc(schema.participants.pendingCheckinRequestedAt));
+  },
+
+  async findOnboardingOlderThan(cutoff: Date) {
+    return db
+      .select()
+      .from(schema.participants)
+      .where(
+        and(
+          eq(schema.participants.status, "onboarding"),
+          lt(schema.participants.joinedAt, cutoff)
+        )
+      );
   },
 
   async incrementCheckins(id: number, completed: boolean) {

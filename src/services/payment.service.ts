@@ -1,6 +1,5 @@
-import { eq, and } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import type { PaymentStatus } from "../db/schema";
 
 export const paymentService = {
   async create(participantId: number) {
@@ -9,6 +8,18 @@ export const paymentService = {
       .values({ participantId })
       .returning();
     return payment;
+  },
+
+  async getOrCreate(participantId: number) {
+    const existing = await this.findByParticipantId(participantId);
+    if (existing) return existing;
+
+    try {
+      return await this.create(participantId);
+    } catch {
+      // Best-effort: avoid hard failure on concurrent creation.
+      return await this.findByParticipantId(participantId);
+    }
   },
 
   async findByParticipantId(participantId: number) {
@@ -88,5 +99,23 @@ export const paymentService = {
     }
 
     return participants.length > 0;
+  },
+
+  async getConfirmedParticipantIdsByChallenge(challengeId: number) {
+    const rows = await db
+      .select({ participantId: schema.payments.participantId })
+      .from(schema.payments)
+      .innerJoin(
+        schema.participants,
+        eq(schema.payments.participantId, schema.participants.id)
+      )
+      .where(
+        and(
+          eq(schema.participants.challengeId, challengeId),
+          eq(schema.payments.status, "confirmed")
+        )
+      );
+
+    return new Set(rows.map((row) => row.participantId));
   },
 };

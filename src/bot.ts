@@ -20,6 +20,7 @@ const privateCommands = [
   { command: "start", description: "Начать работу с ботом" },
   { command: "status", description: "Статус участия в челленджах" },
   { command: "help", description: "Справка по боту" },
+  { command: "clear_db", description: "Очистить базу (админ)" },
 ];
 
 // Commands for group chats

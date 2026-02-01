@@ -41,6 +41,10 @@ export const participants = sqliteTable("participants", {
   completedCheckins: integer("completed_checkins").notNull().default(0),
   skippedCheckins: integer("skipped_checkins").notNull().default(0),
 
+  // Pending check-in handoff (from group to private chat)
+  pendingCheckinWindowId: integer("pending_checkin_window_id"),
+  pendingCheckinRequestedAt: integer("pending_checkin_requested_at", { mode: "timestamp" }),
+
   // Status
   status: text("status", { enum: participantStatusEnum }).notNull().default("onboarding"),
 

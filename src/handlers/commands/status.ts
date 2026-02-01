@@ -1,5 +1,7 @@
 import type { BotContext } from "../../types";
 import { participantService, challengeService, goalService } from "../../services";
+import { config } from "../../config";
+import { formatDuration } from "../../utils/duration";
 
 export async function statusCommand(ctx: BotContext) {
   const userId = ctx.from?.id;
@@ -28,38 +30,52 @@ export async function statusCommand(ctx: BotContext) {
     for (const p of participations) {
       const challenge = await challengeService.findById(p.challengeId);
       if (!challenge) continue;
+      const participants = await participantService.findByChallengeId(challenge.id);
+      const totalParticipants = participants.length;
+      const activeParticipants = participants.filter((pp) => pp.status === "active").length;
 
       let statusText = "";
       let action = "";
 
       switch (p.status) {
         case "onboarding":
-          statusText = "⏳ Онбординг не завершён";
-          action = "Напишите /start чтобы продолжить";
+          statusText = "Онбординг не завершён";
+          action = "Напишите /start, чтобы продолжить";
           break;
         case "pending_payment":
-          statusText = "💳 Ожидает оплаты";
-          action = "Оплатите и нажмите 'Я оплатил' в чате";
+          statusText = "Ожидает оплаты";
+          action = "Оплатите и нажмите «Я оплатил» в чате";
           break;
         case "payment_marked":
-          statusText = "⏳ Ожидает подтверждения оплаты";
+          statusText = "Оплата отмечена, ждёт подтверждения";
           break;
         case "active":
-          statusText = `✅ Активен (${p.completedCheckins}/${p.totalCheckins} чек-инов)`;
+          statusText = `Активен (${p.completedCheckins}/${p.totalCheckins} чек-инов)`;
           break;
         case "dropped":
-          statusText = "🚫 Выбыл";
+          statusText = "Не участвуете (выбыли/исключены)";
           break;
         case "disqualified":
-          statusText = "❌ Дисквалифицирован";
+          statusText = "Дисквалифицированы (пропуски чек-инов)";
           break;
         case "completed":
-          statusText = "🏁 Завершён";
+          statusText = "Челлендж завершён";
           break;
       }
 
       message += `*${challenge.chatTitle}*\n`;
-      message += `Статус: ${statusText}\n`;
+      message += `Статус участия: ${statusText}\n`;
+      if (challenge.startedAt) {
+        message += `Старт: ${challenge.startedAt.toLocaleDateString("ru-RU")}\n`;
+      } else {
+        message += `Старт: ещё не начался\n`;
+      }
+      if (challenge.endsAt) {
+        message += `Финиш: ${challenge.endsAt.toLocaleDateString("ru-RU")}\n`;
+      } else {
+        message += `Финиш: не назначен\n`;
+      }
+      message += `Участников: ${totalParticipants} (активных: ${activeParticipants})\n`;
 
       if (p.startWeight && p.startWaist) {
         const goal = await goalService.findByParticipantId(p.id);
@@ -127,7 +143,10 @@ export async function statusCommand(ctx: BotContext) {
   let message =
     `${statusEmoji} *Статус челленджа*\n\n` +
     `Статус: ${statusText}\n` +
-    `Длительность: ${challenge.durationMonths} месяцев\n` +
+    `Длительность: ${formatDuration(
+      challenge.durationMonths,
+      config.challengeDurationUnit
+    )}\n` +
     `Ставка: ${challenge.stakeAmount}₽\n` +
     `Участников: ${participants.length}\n`;
 

@@ -2,6 +2,10 @@ import type { Track } from "../db/schema";
 
 export interface OnboardingData {
   challengeId?: number;
+  resumeParticipantId?: number;
+  resumePromptEnabled?: boolean;
+  resumePromptComplete?: boolean;
+  pendingText?: string;
   track?: Track;
   weight?: number;
   waist?: number;
